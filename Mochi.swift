@@ -829,25 +829,18 @@ final class CatView: NSView {
         }
     }
 
-    /// 허공의 투명 발판: 살짝 빛나는 유리 선반
+    /// 허공의 투명 발판: 발밑의 은은한 그림자 + 양끝이 흐려지는 가는 선 하나
     private func drawPlatform() {
         let a = platA
         let l = platL, r = platR, y: CGFloat = 6
-        let glow = NSBezierPath(roundedRect: CGRect(x: l - 3, y: y - 6.5, width: r - l + 6, height: 9), xRadius: 4.5, yRadius: 4.5)
-        rgb(0xB9C8FF, 0.16 * a).setFill()
-        glow.fill()
-        let body = NSBezierPath(roundedRect: CGRect(x: l, y: y - 4, width: r - l, height: 4), xRadius: 2, yRadius: 2)
-        NSGradient(starting: rgb(0xFFFFFF, 0.42 * a), ending: rgb(0xDCE4FF, 0.12 * a))?.draw(in: body, angle: -90)
-        rgb(0xFFFFFF, 0.35 * a).setStroke()
-        body.lineWidth = 0.5
-        body.stroke()
-        let top = NSBezierPath()
-        top.move(to: P(l + 3, y - 0.4))
-        top.line(to: P(r - 3, y - 0.4))
-        top.lineWidth = 0.9
-        top.lineCapStyle = .round
-        rgb(0xFFFFFF, 0.8 * a).setStroke()
-        top.stroke()
+        // 발이 닿은 곳의 부드러운 그림자
+        let sh = NSBezierPath(ovalIn: CGRect(x: 50 - 24, y: y - 2.6, width: 48, height: 5.2))
+        NSGradient(colors: [rgb(0x2A2438, 0.22 * a), rgb(0x2A2438, 0)])?.draw(in: sh, relativeCenterPosition: .zero)
+        // 가는 선: 가운데는 또렷하고 양끝은 사라짐
+        let line = CGRect(x: l, y: y - 0.9, width: r - l, height: 0.9)
+        let c = rgb(0xFFFFFF, 0.55 * a), z = rgb(0xFFFFFF, 0)
+        let g = NSGradient(colors: [z, c, c, z], atLocations: [0, 0.3, 0.7, 1], colorSpace: .sRGB)
+        g?.draw(in: NSBezierPath(roundedRect: line, xRadius: 0.45, yRadius: 0.45), angle: 0)
     }
 
     // MARK: draw
