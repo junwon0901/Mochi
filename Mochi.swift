@@ -1294,6 +1294,8 @@ enum CatState {
 final class CatWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    /// macOS가 메뉴바와 겹치는 창을 아래로 밀어내지 않게 (고양이 창은 위쪽 여백이 커서 화면 위쪽에서 밀려 내려갔음)
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 let gravity: CGFloat = 2400
