@@ -7,12 +7,6 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a S
   <img src="docs/closeup-peek.png" width="49%" alt="A siamese peeking out from behind a window">
 </p>
 
-<details>
-<summary>All poses</summary>
-
-![poses](docs/preview.png)
-</details>
-
 ## What it does
 - Walks, runs, grooms, stretches, yawns, kneads, rolls over, tilts its head, loafs, and sleeps (when it gets sleepy it curls up in a corner of the screen)
 - Parkour: leaps between windows like jumping across rooftops
