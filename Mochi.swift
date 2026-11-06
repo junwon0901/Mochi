@@ -1499,10 +1499,10 @@ final class Cat {
     func goSleepInCorner() {
         guard surface.isFloor else {
             pendingSleep = true
-            targetX = Bool.random() ? surface.maxX + 30 * s : surface.minX - 30 * s
-            enter(.walk)
+            leaveSurface()
             return
         }
+        comeMode = nil
         let jitter = CGFloat(app.cats.firstIndex { $0 === self } ?? 0) * 70 * s + CGFloat.random(in: 0...15) * s
         let left = surface.minX + 48 * s + jitter
         let right = surface.maxX - 48 * s - jitter
@@ -1567,7 +1567,7 @@ final class Cat {
             let vis = app.screen(x: cx, y: footY + 1).visibleFrame
             let ty = min(footY + CGFloat.random(in: 220...520) * s, vis.maxY - 130 * s)
             if ty > footY + 120 * s {
-                let tx = clampf(cx + CGFloat.random(in: 150...500) * s * (Bool.random() ? 1 : -1), vis.minX + 80 * s, vis.maxX - 80 * s)
+                let tx = clampf(cx + CGFloat.random(in: 200...560) * s * (Bool.random() ? 1 : -1), vis.minX + 130 * s, vis.maxX - 130 * s)
                 startCome(.spot, spot: P(tx, ty))
                 return
             }
@@ -1575,14 +1575,13 @@ final class Cat {
         // 투명 발판 위에서는 발판을 밟으며 내려옴
         if app.onPlatform(self) && chance(0.35) {
             let vis = app.screen(x: cx, y: footY + 1).visibleFrame
-            let tx = clampf(cx + CGFloat.random(in: 120...420) * s * (Bool.random() ? 1 : -1), vis.minX + 60 * s, vis.maxX - 60 * s)
+            let tx = clampf(cx + CGFloat.random(in: 200...480) * s * (Bool.random() ? 1 : -1), vis.minX + 130 * s, vis.maxX - 130 * s)
             startCome(.spot, spot: P(tx, app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb).y))
             return
         }
         if !surface.isFloor && chance(0.2) {
             clearPlans()
-            targetX = Bool.random() ? surface.maxX + 30 * s : surface.minX - 30 * s
-            enter(.walk)
+            leaveSurface()
             return
         }
         let r = Double.random(in: 0..<1)
@@ -1606,9 +1605,9 @@ final class Cat {
     // MARK: 투명 발판으로 이동
 
     func startCome(_ mode: ComeMode, spot: CGPoint = .zero) {
-        let hops = parkourHops
+        let hops = parkourHops, sleepy = pendingSleep, watch = pendingWatch
         clearPlans()
-        if mode == .spot { parkourHops = hops }
+        if mode == .spot { parkourHops = hops; pendingSleep = sleepy; pendingWatch = watch }
         comeMode = mode
         comeSpot = spot
         trekHops = 0
@@ -1634,8 +1633,10 @@ final class Cat {
         trekHops += 1
         if trekHops > 16 { arriveCome(mode); return }
         let vis = app.screen(x: cx, y: footY + 1).visibleFrame
-        let stepX = CGFloat.random(in: 170...250) * s
+        let stepX = CGFloat.random(in: 260...420) * s
         let stepUp = CGFloat.random(in: 130...190) * s
+        // 투명 발판은 화면 가장자리에서 충분히 떨어뜨림 (끝에서 떨어질 때 벽에 막혀 되돌아오지 않게)
+        let pLo = vis.minX + 130 * s, pHi = vis.maxX - 130 * s
         var tx: CGFloat
         var ty: CGFloat
         if abs(dx) <= stepX * 1.7 && dy <= stepUp * 1.3 && dy > -520 {
@@ -1644,15 +1645,17 @@ final class Cat {
         } else if dy > 0 {
             ty = footY + min(dy, stepUp)
             if abs(dx) < stepX * 0.6 {
-                // 거의 수직이면 계단처럼 좌우로 지그재그
-                let side: CGFloat = trekHops % 2 == 0 ? 1 : -1
-                tx = cx + side * CGFloat.random(in: 90...150) * s
+                // 거의 수직이면 계단처럼 좌우로 크게 지그재그 (막힌 쪽이면 반대쪽으로)
+                var side: CGFloat = trekHops % 2 == 0 ? 1 : -1
+                let w = CGFloat.random(in: 200...320) * s
+                if cx + side * w > pHi || cx + side * w < pLo { side = -side }
+                tx = cx + side * w
             } else {
                 tx = cx + clampf(dx, -stepX, stepX)
             }
         } else {
             ty = max(g.y, footY - 360 * s)
-            tx = cx + clampf(dx, -stepX * 1.6, stepX * 1.6)
+            tx = cx + clampf(dx, -stepX * 1.4, stepX * 1.4)
         }
         tx = clampf(tx, vis.minX + 60 * s, vis.maxX - 60 * s)
         ty = min(ty, vis.maxY - 115 * s)
@@ -1662,15 +1665,35 @@ final class Cat {
         if ty - real.y < 30 * s {
             ty = real.y
         } else {
+            tx = clampf(tx, pLo, pHi)
             app.addPlatform(x: tx, y: ty, width: 150 * s)
         }
         leap(to: P(tx, ty))
     }
 
+    /// 창이나 발판에서 내려가기. 끝에서 떨어져도 화면 벽에 막혀 같은 자리로 되돌아오지 않는 쪽으로만 걸어감.
+    /// 양쪽이 다 막혔으면 (화면 끝에 붙은 발판·창) 투명 발판을 밟고 내려감
+    func leaveSurface() {
+        let all = app.allFrame
+        var opts: [CGFloat] = []
+        if surface.maxX + 6 * s < all.maxX - 45 * s { opts.append(surface.maxX + 30 * s) }
+        if surface.minX - 6 * s > all.minX + 45 * s { opts.append(surface.minX - 30 * s) }
+        if let x = opts.randomElement() {
+            targetX = x
+            enter(.walk)
+            return
+        }
+        let vis = app.screen(x: cx, y: footY + 1).visibleFrame
+        let dir: CGFloat = cx > vis.midX ? -1 : 1
+        let tx = clampf(cx + dir * CGFloat.random(in: 220...460) * s, vis.minX + 130 * s, vis.maxX - 130 * s)
+        startCome(.spot, spot: P(tx, app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb).y))
+    }
+
     private func leap(to tg: CGPoint) {
         let top = app.screen(x: tg.x, y: tg.y).visibleFrame.maxY
         let low = max(tg.y, footY)
-        let peak = min(low + CGFloat.random(in: 40...80) * s, top - 95 * s)
+        let arc = CGFloat.random(in: 40...80) * s + abs(tg.x - cx) * 0.15
+        let peak = min(low + arc, top - 95 * s)
         grabbing = false
         pounce = P(tg.x, max(peak, low + 20))
         pounceLand = tg.y
@@ -1696,6 +1719,8 @@ final class Cat {
             waitingCursor = true
             waitSleepAt = Double.random(in: 18...40) / nightFactor()
         case .spot:
+            if pendingSleep && surface.isFloor { goSleepInCorner(); return }
+            if pendingWatch && surface.isFloor { goWatch(); return }
             if parkourHops > 0 { parkourHops -= 1 }
             enter(.land)
         }
@@ -1737,10 +1762,10 @@ final class Cat {
         let (x, fr) = app.watchSpot(for: self)
         if !surface.isFloor {
             pendingWatch = true
-            targetX = Bool.random() ? surface.maxX + 30 * s : surface.minX - 30 * s
-            enter(.walk)
+            leaveSurface()
             return
         }
+        comeMode = nil
         targetX = clampf(x, surface.minX + 45 * s, surface.maxX - 45 * s)
         if abs(targetX - cx) < 6 * s {
             pendingWatch = false
@@ -2679,7 +2704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let vis = screen(x: m.x, y: m.y).visibleFrame
         let idx = CGFloat(cats.firstIndex { $0 === c } ?? 0)
         let side: CGFloat = c.cx < m.x ? -1 : 1
-        let gx = clampf(m.x + side * (55 + idx * 50) * s, vis.minX + 60 * s, vis.maxX - 60 * s)
+        let gx = clampf(m.x + side * (55 + idx * 50) * s, vis.minX + 130 * s, vis.maxX - 130 * s)
         var gy = max(vis.minY, min(m.y - 55 * s, vis.maxY - 115 * s))
         let g = ground(x: gx, fromY: gy + 30 * s, allowWindows: climb)
         if gy - g.y < 45 * s { gy = g.y }      // 바로 밑에 창이나 바닥이 있으면 거기 앉음
