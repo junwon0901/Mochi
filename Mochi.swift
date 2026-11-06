@@ -644,6 +644,10 @@ final class CatView: NSView {
     var peekRot: CGFloat = 0
     var hangAngle: CGFloat = 0
     var particles: [Particle] = []
+    // 고양이가 서 있는 투명 발판 (단위 좌표, 고양이 발 높이)
+    var platL: CGFloat = 0
+    var platR: CGFloat = 0
+    var platA: CGFloat = 0
 
     private var downLoc = CGPoint.zero
     private var downOrigin = CGPoint.zero
@@ -825,12 +829,43 @@ final class CatView: NSView {
         }
     }
 
+    /// 허공의 투명 발판: 살짝 빛나는 유리 선반
+    private func drawPlatform() {
+        let a = platA
+        let l = platL, r = platR, y: CGFloat = 6
+        let glow = NSBezierPath(roundedRect: CGRect(x: l - 3, y: y - 6.5, width: r - l + 6, height: 9), xRadius: 4.5, yRadius: 4.5)
+        rgb(0xB9C8FF, 0.16 * a).setFill()
+        glow.fill()
+        let body = NSBezierPath(roundedRect: CGRect(x: l, y: y - 4, width: r - l, height: 4), xRadius: 2, yRadius: 2)
+        NSGradient(starting: rgb(0xFFFFFF, 0.42 * a), ending: rgb(0xDCE4FF, 0.12 * a))?.draw(in: body, angle: -90)
+        rgb(0xFFFFFF, 0.35 * a).setStroke()
+        body.lineWidth = 0.5
+        body.stroke()
+        let top = NSBezierPath()
+        top.move(to: P(l + 3, y - 0.4))
+        top.line(to: P(r - 3, y - 0.4))
+        top.lineWidth = 0.9
+        top.lineCapStyle = .round
+        rgb(0xFFFFFF, 0.8 * a).setStroke()
+        top.stroke()
+    }
+
     // MARK: draw
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.clear.setFill()
         bounds.fill(using: .copy)
         let s = bounds.width / (100 + 2 * MX)
+
+        if platA > 0.01 {
+            NSGraphicsContext.saveGraphicsState()
+            let tp = NSAffineTransform()
+            tp.scale(by: s)
+            tp.translateX(by: MX, yBy: 0)
+            tp.concat()
+            drawPlatform()
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         if Sprites.shared.ok {
             NSGraphicsContext.saveGraphicsState()
@@ -1337,6 +1372,12 @@ final class Cat {
     var waitSleepAt: Double = 25
     var visited = false
     var pendingWatch = false
+    // 제자리 걷기·달리기 감지
+    var progX: CGFloat = 0
+    var progT: Double = 0
+    var moveStartX: CGFloat = -9999
+    var moveStartT: Double = 0
+    var moveRepeats = 0
 
     var R: CGFloat { (Sprites.shared.ok ? 17 : 21) * s }
     /// 숨을 때 머리를 더 깊이 넣어야 하는 배수 (그림은 귀와 털이 큼)
@@ -1372,6 +1413,11 @@ final class Cat {
     // MARK: 상태 전환
 
     func enter(_ st: CatState, dur: Double? = nil) {
+        if st == .walk || st == .run || st == .zoom {
+            if abs(cx - moveStartX) < 6 * s && t - moveStartT < 4 { moveRepeats += 1 } else { moveRepeats = 0 }
+            moveStartX = cx
+            moveStartT = t
+        }
         state = st
         stateT = 0
         fxT = 0
@@ -2071,6 +2117,21 @@ final class Cat {
         if hypot(mouse.x - lastMouse.x, mouse.y - lastMouse.y) > 2 { stillT = 0; lastMouse = mouse } else { stillT += dt }
         if stillT < 1 { visited = false }
 
+        // 안전장치: 걷기·달리기가 제자리에서 반복되면 계획을 버리고 잠시 앉음
+        if state == .walk || state == .run || state == .zoom {
+            if abs(cx - progX) > 2 * s { progX = cx; progT = 0 } else { progT += dt }
+            if progT > 1.0 || moveRepeats >= 3 {
+                progT = 0
+                moveRepeats = 0
+                moveStartX = -9999
+                clearPlans()
+                enter(.idle, dur: Double.random(in: 3...6))
+            }
+        } else {
+            progX = cx
+            progT = 0
+        }
+
         switch state {
         case .idle:
             awake += dt
@@ -2319,6 +2380,22 @@ final class Cat {
     private func animate(_ dt: Double, _ m: CGPoint) {
         let v = view
         v.facingRight = facingRight
+
+        var plat: Plat? = nil
+        switch state {
+        case .jump, .fall, .dragged, .hang, .hide: break
+        default:
+            if !surface.isFloor {
+                plat = app.plats.first { abs($0.y - surface.y) < 1 && cx >= $0.minX - 2 && cx <= $0.maxX + 2 }
+            }
+        }
+        if let p = plat {
+            v.platL = (p.minX - origin.x) / s
+            v.platR = (p.maxX - origin.x) / s
+            v.platA = min(1, v.platA + CGFloat(dt) * 5)
+        } else {
+            v.platA = 0
+        }
 
         switch state {
         case .idle: v.pose = idlePose
