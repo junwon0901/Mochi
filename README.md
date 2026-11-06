@@ -1,33 +1,33 @@
 # Mochi 🐾
 
-macOS 화면을 돌아다니는 데스크톱 고양이예요. 랙돌과 샴 중에서 고를 수 있어요.
+A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a Siamese.
 
 ![preview](docs/preview.png)
 
-## 할 수 있는 것
-- 걷기, 달리기, 그루밍, 기지개, 하품, 꾹꾹이, 발라당, 갸웃, 식빵, 잠자기 (졸리면 화면 구석으로 가서 자요)
-- 창 사이를 건물 옥상처럼 뛰어다니는 파쿠르
-- 창 뒤에 숨어서 위·옆·아래(거꾸로)·모서리에서 빼꼼
-- 커서를 쫓아가 엉덩이를 씰룩이다가 덮치기, 커서에 매달리기 (커서를 흔들면 같이 흔들려요)
-- 들어서 옮기기, 던지기
-- 고양이 여러 마리, 고양이마다 다른 종
-- 활동량 (차분하게 / 보통 / 활발하게), 크기, 메뉴바 아이콘 모양, 언어 (시스템 설정 / 한국어 / English), 로그인 시 자동 실행
+## What it does
+- Walks, runs, grooms, stretches, yawns, kneads, rolls over, tilts its head, loafs, and sleeps (when it gets sleepy it curls up in a corner of the screen)
+- Parkour: leaps between windows like jumping across rooftops
+- Hides behind windows and peeks out from the top, the sides, the bottom (upside down) and near the corners
+- Chases your cursor, wiggles its bottom and pounces, or hangs from the cursor (shake the cursor and it swings)
+- Pick it up and carry it, or throw it
+- Several cats at once, each with its own breed
+- Settings: activity level (calm / normal / playful), size, language (system / 한국어 / English), open at login
 
-## 빌드하고 실행하기
-Xcode 또는 Command Line Tools(`xcode-select --install`)가 필요해요. macOS 12 이상에서 동작해요.
+## Build and install
+Requires Xcode or the Command Line Tools (`xcode-select --install`). Runs on macOS 12 or later.
 
 ```bash
 ./build.sh
 ```
 
-빌드가 끝나면 응용 프로그램 폴더(`/Applications/Mochi.app`)에 바로 설치되고 실행돼요. 이미 켜져 있던 모찌는 자동으로 새 버전으로 바뀌어요.
+The script builds the app, installs it straight into `/Applications/Mochi.app` and launches it. If an older Mochi is running, it is replaced with the new version.
 
-## 조작
-- 클릭: 쓰다듬기
-- 드래그: 들어서 옮기기 (휙 놓으면 던져져요)
-- 우클릭(또는 메뉴바 아이콘): 메뉴
+## Controls
+- Click: pet the cat
+- Drag: pick it up and carry it (flick to throw)
+- Right-click the cat, or click the menu bar icon: open the menu
 
-## 폴더 구조
-- `Mochi.swift`: 앱 전체 코드 (AppKit, 파일 하나)
-- `sprites/<종>/*.png`: 행동별 그림
-- `build.sh`: 앱 묶음(.app)을 만드는 스크립트
+## Project layout
+- `Mochi.swift`: the whole app (AppKit, single file)
+- `sprites/<breed>/*.png`: the artwork for each behavior
+- `build.sh`: builds `Mochi.app` and installs it into Applications

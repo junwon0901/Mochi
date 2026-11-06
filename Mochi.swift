@@ -2035,7 +2035,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var hideEnabled: Bool { get { d.bool(forKey: "hide") } set { d.set(newValue, forKey: "hide") } }
     var hideIcon: Bool { get { d.bool(forKey: "hideIcon") } set { d.set(newValue, forKey: "hideIcon") } }
     /// 활동량: 0 차분하게, 1 보통, 2 활발하게
-    var iconStyle: Int { get { d.integer(forKey: "iconStyle") } set { d.set(newValue, forKey: "iconStyle") } }
     var language: String { get { d.string(forKey: "language") ?? "system" } set { d.set(newValue, forKey: "language") } }
     var energyLevel: Int { get { d.integer(forKey: "energy") } set { d.set(newValue, forKey: "energy") } }
     var energy: Energy { Energy.levels[max(0, min(2, energyLevel))] }
@@ -2276,14 +2275,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if #available(macOS 13.0, *) {
             m.addItem(item(L("로그인 시 자동 실행", "Open at login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         }
-        let iconMenu = NSMenu()
-        let styles = [L("앉은 뒷모습", "Sitting cat"), L("얼굴 로고", "Cat face"), L("선 얼굴", "Line face")]
-        for (i, name) in styles.enumerated() {
-            iconMenu.addItem(item(name, #selector(setIconStyle(_:)), i, on: iconStyle == i))
-        }
-        let ii = NSMenuItem(title: L("메뉴바 아이콘 모양", "Menu bar icon"), action: nil, keyEquivalent: "")
-        ii.submenu = iconMenu
-        m.addItem(ii)
         let langMenu = NSMenu()
         let langs: [(String, String)] = [("system", L("시스템 설정 따르기", "Same as system")), ("ko", "한국어"), ("en", "English")]
         for (code, name) in langs {
@@ -2341,11 +2332,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for c in cats { c.setScale(scale) }
     }
     @objc func toggleChase() { chase.toggle() }
-    @objc func setIconStyle(_ it: NSMenuItem) {
-        guard let i = it.representedObject as? Int else { return }
-        iconStyle = i
-        statusItem?.button?.image = AppDelegate.icon(style: i)
-    }
     @objc func setLanguage(_ it: NSMenuItem) {
         guard let code = it.representedObject as? String else { return }
         language = code
@@ -2380,7 +2366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let si = statusItem { NSStatusBar.system.removeStatusItem(si); statusItem = nil }
         } else if statusItem == nil {
             let si = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            si.button?.image = AppDelegate.icon(style: iconStyle)
+            si.button?.image = AppDelegate.icon()
             si.button?.toolTip = "Mochi"
             let menu = NSMenu()
             menu.delegate = self
@@ -2389,45 +2375,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// 메뉴바 아이콘 (18pt 템플릿, 라이트/다크 모드에 맞춰 색이 바뀜)
-    /// 0: 앉은 뒷모습 실루엣(기본)  1: 얼굴 로고  2: 선 얼굴
-    static func icon(style: Int) -> NSImage {
+    /// 메뉴바 아이콘: 앉아서 등을 보인 고양이 실루엣 (18pt 템플릿, 라이트/다크 모드에 맞춰 색이 바뀜)
+    static func icon() -> NSImage {
         let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
             NSColor.black.setFill()
-            NSColor.black.setStroke()
-            switch style {
-            case 1:
-                let h = NSBezierPath()
-                h.move(to: P(2.6, 9.4)); h.line(to: P(3.0, 2.4)); h.line(to: P(6.9, 5.3))
-                h.curve(to: P(11.1, 5.3), controlPoint1: P(8.3, 4.9), controlPoint2: P(9.7, 4.9))
-                h.line(to: P(15.0, 2.4)); h.line(to: P(15.4, 9.4))
-                h.curve(to: P(9.0, 16.2), controlPoint1: P(15.8, 13.8), controlPoint2: P(12.8, 16.2))
-                h.curve(to: P(2.6, 9.4), controlPoint1: P(5.2, 16.2), controlPoint2: P(2.2, 13.8))
-                h.close()
-                h.fill()
-                NSGraphicsContext.current?.compositingOperation = .clear
-                for (cx, deg) in [(CGFloat(6.3), CGFloat(-12)), (CGFloat(11.7), CGFloat(12))] {
-                    let e = NSBezierPath(ovalIn: CGRect(x: -1.35, y: -0.75, width: 2.7, height: 1.5))
-                    var t = AffineTransform(rotationByDegrees: deg)
-                    t.append(AffineTransform(translationByX: cx, byY: 10.0))
-                    e.transform(using: t)
-                    e.fill()
-                }
-                tri(P(8.3, 12.5), P(9.7, 12.5), P(9.0, 13.3)).fill()
-            case 2:
-                let p = NSBezierPath()
-                p.move(to: P(3.4, 9.0)); p.line(to: P(3.6, 3.0)); p.line(to: P(7.0, 5.6))
-                p.curve(to: P(11.0, 5.6), controlPoint1: P(8.3, 5.2), controlPoint2: P(9.7, 5.2))
-                p.line(to: P(14.4, 3.0)); p.line(to: P(14.6, 9.0))
-                p.curve(to: P(9.0, 15.6), controlPoint1: P(15.0, 13.2), controlPoint2: P(12.4, 15.6))
-                p.curve(to: P(3.4, 9.0), controlPoint1: P(5.6, 15.6), controlPoint2: P(3.0, 13.2))
-                p.close()
-                p.lineWidth = 1.15
-                p.lineJoinStyle = .round
-                p.stroke()
-                oval(6.7, 10.1, 1.3, 1.7).fill()
-                oval(11.3, 10.1, 1.3, 1.7).fill()
-            default:
+            do {
                 // 앉아서 등을 보인 고양이 실루엣 (보내주신 로고를 따라 그린 윤곽)
                 let pts: [CGPoint] = [
             P(5.44, 0.60), P(5.32, 0.70), P(5.24, 0.99), P(5.24, 1.79), P(5.39, 2.99), P(5.22, 3.53),
