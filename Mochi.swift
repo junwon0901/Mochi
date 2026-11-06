@@ -1365,6 +1365,11 @@ final class Cat {
     var trekHops = 0
     var waitingCursor = false
     var waitSleepAt: Double = 25
+    var waitLoafAt: Double = 25
+    var waitT: Double = 0
+    var waitKey: String?
+    var waitKeyUntil: Double = 0
+    var waitNextAct: Double = 0
     var visited = false
     var pendingWatch = false
     // 제자리 걷기·달리기 감지
@@ -1424,6 +1429,7 @@ final class Cat {
             loafKey = chance(0.5) ? "loaf" : "loafclosed"
             askedTilt = false
             waitingCursor = false
+            waitKey = nil
         case .sleep: stateDur = dur ?? Double.random(in: app.energy.sleepDur) * nightFactor()
         case .watch: stateDur = Double.random(in: 240...480) / nightFactor()
         case .groom: stateDur = Double.random(in: 3...6)
@@ -1763,14 +1769,35 @@ final class Cat {
             enter(.idle, dur: 3600)
             idlePose = .sit
             idleKey = "front"
-            waitingCursor = true
-            waitSleepAt = Double.random(in: 18...40) / nightFactor()
+            startWaiting()
         case .spot:
             if pendingSleep && surface.isFloor { goSleepInCorner(); return }
             if pendingWatch && surface.isFloor { goWatch(); return }
             if parkourHops > 0 { parkourHops -= 1 }
             enter(.land)
         }
+    }
+
+    /// 커서 곁에서 시간 보내기 시작: 구경 → 이것저것 → 식빵 → 잠
+    func startWaiting() {
+        waitingCursor = true
+        waitT = 0
+        waitKey = nil
+        waitNextAct = Double.random(in: 3...6)
+        waitSleepAt = Double.random(in: 45...90) / nightFactor()
+        waitLoafAt = waitSleepAt * Double.random(in: 0.5...0.65)
+    }
+
+    /// 커서 곁에서 할 작은 행동 하나 고르기 (그림 이름, 길이)
+    private func pickWaitAct(_ m: CGPoint) {
+        var opts: [(String, Double)] = [("groom", 3.2), ("blink", 1.6), ("tilt", 1.8), ("lookup", 2.2), ("front", 2.0)]
+        let reach = abs(m.x - cx) < 110 * s && m.y > footY + 15 * s && m.y < footY + 150 * s
+        if reach && breed == .siamese { opts += [("play", 1.1), ("play", 1.1)] }   // 앞발로 커서 툭
+        if waitT > 15 { opts.append(("yawn", 1.4)) }
+        let o = opts.randomElement()!
+        waitKey = o.0
+        waitKeyUntil = waitT + o.1
+        if o.0 == "play" { facingRight = m.x > cx }
     }
 
     /// 맥을 깨우면 반갑게 달려옴
@@ -2146,23 +2173,34 @@ final class Cat {
                 askedTilt = true
                 emit("?", color: rgb(0x8A7BD8), size: 12, dy: 22, vel: P(0, 8), life: 1.2)
             }
-            if stillT > 4 && near { stateDur = max(stateDur, stateT + 1) }   // 커서가 곁에 있으면 계속 쳐다봄
+            // 커서가 곁에 가만히 있으면 같이 시간을 보냄 (계속 쳐다보기만 하지 않음)
+            if stillT > 4 && near && !waitingCursor { startWaiting() }
             if waitingCursor {
-                // 커서 옆에서 기다리다가 그대로 잠듦
-                if abs(mouse.x - cx) > 10 * s { facingRight = mouse.x > cx }
+                waitT += dt
+                if waitKey == nil && abs(mouse.x - cx) > 10 * s { facingRight = mouse.x > cx }
                 if stillT < 0.3 {
                     waitingCursor = false
+                    waitKey = nil
                     stateDur = stateT + Double.random(in: 1.5...3)
-                } else if stateT > waitSleepAt {
+                } else if waitT > waitSleepAt {
+                    // 그대로 커서 옆에서 잠듦
                     waitingCursor = false
+                    waitKey = nil
                     awake = 0
                     enter(.sleep, dur: Double.random(in: 60...180) * nightFactor())
                 } else {
-                    if stateT > 10 {
-                        idlePose = .loaf
-                        loafKey = stateT > waitSleepAt - 6 ? "loafclosed" : "loaf"
-                    }
                     stateDur = max(stateDur, stateT + 1)
+                    if waitT > waitLoafAt {
+                        waitKey = nil
+                        idlePose = .loaf
+                        loafKey = waitT > waitSleepAt - 10 ? "loafclosed" : "loaf"
+                    } else {
+                        if waitKey != nil && waitT > waitKeyUntil {
+                            waitKey = nil
+                            waitNextAct = waitT + Double.random(in: 4...8)
+                        }
+                        if waitKey == nil && waitT > waitNextAct { pickWaitAct(mouse) }
+                    }
                 }
             }
             if app.musicPlaying && idlePose != .loaf && chance(dt * 0.22) {
@@ -2439,6 +2477,9 @@ final class Cat {
             key = idlePose == .loaf ? loafKey : idleKey
             if idlePose != .loaf && m.y > footY + 110 * s && abs(m.x - cx) < 320 { key = "lookup" }   // 위에 있는 커서 올려다보기
             if idlePose != .loaf && askedTilt && stillT > 1.5 { key = "tilt" }                      // 갸웃
+            if idlePose != .loaf, waitingCursor, let wk = waitKey {
+                key = wk == "groom" ? (Int(stateT / 0.9) % 2 == 0 ? "groom" : "wash") : wk
+            }
         case .walk:
             key = running ? gallop[gi] : "walk" + String(frame)
         case .run, .zoom: key = gallop[gi]
@@ -2460,7 +2501,7 @@ final class Cat {
             // 화면을 올려다보다가, 갸웃했다가, 가끔 앞발로 툭. 오래 보면 식빵 자세로 졸기
             let c = stateT.truncatingRemainder(dividingBy: 18)
             if stateT > 120 { key = stateT > 200 ? "loafclosed" : "loaf" }
-            else if stateT > 15 && c > 15.5 && c < 16.4 { key = "play" }
+            else if stateT > 15 && c > 15.5 && c < 16.4 && breed == .siamese { key = "play" }
             else if c > 9 && c < 11 { key = "tilt" }
             else { key = "lookup" }
         case .hide:
