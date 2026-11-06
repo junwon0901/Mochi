@@ -1,19 +1,19 @@
 #!/bin/bash
-# Mochi를 빌드해서 응용 프로그램 폴더(/Applications)에 바로 설치하고 실행해요.
-# 사용법: 이 폴더에서 ./build.sh
+# Builds Mochi, installs it into /Applications and launches it.
+# Usage: ./build.sh (run from this folder)
 set -e
 cd "$(dirname "$0")"
 
 DEST="/Applications"
 if [ ! -w "$DEST" ]; then
-  DEST="$HOME/Applications"          # /Applications에 쓸 권한이 없으면 내 응용 프로그램 폴더로
+  DEST="$HOME/Applications"          # fall back to ~/Applications if /Applications is not writable
   mkdir -p "$DEST"
 fi
 WORK="$(mktemp -d)"
 APP="$WORK/Mochi.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "🐱 컴파일 중... (1분 정도 걸릴 수 있어요)"
+echo "🐱 Compiling... (this can take about a minute)"
 swiftc -O -parse-as-library -o "$APP/Contents/MacOS/Mochi" Mochi.swift
 
 cp -R sprites "$APP/Contents/Resources/sprites"
@@ -49,12 +49,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
-# 켜져 있는 모찌를 끄고 새 버전으로 바꾸기
+# Quit any running Mochi and replace it with the new build
 pkill -x Mochi 2>/dev/null || true
 sleep 0.5
 rm -rf "$DEST/Mochi.app"
 cp -R "$APP" "$DEST/Mochi.app"
 rm -rf "$WORK"
 
-echo "✅ 설치 완료: $DEST/Mochi.app"
+echo "✅ Installed: $DEST/Mochi.app"
 open "$DEST/Mochi.app"

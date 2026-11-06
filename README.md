@@ -2,7 +2,20 @@
 
 A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a Siamese.
 
-![preview](docs/preview.png)
+<p>
+  <img src="docs/closeup-parkour.png" width="49%" alt="A ragdoll leaping off the top of a window">
+  <img src="docs/closeup-peek.png" width="49%" alt="A siamese peeking out from behind a window">
+</p>
+<p>
+  <img src="docs/screenshot-parkour.png" width="49%" alt="Mochi on the desktop, jumping between windows">
+  <img src="docs/screenshot-peek.png" width="49%" alt="Mochi on the desktop, hiding behind a window">
+</p>
+
+<details>
+<summary>All poses</summary>
+
+![poses](docs/preview.png)
+</details>
 
 ## What it does
 - Walks, runs, grooms, stretches, yawns, kneads, rolls over, tilts its head, loafs, and sleeps (when it gets sleepy it curls up in a corner of the screen)
@@ -22,6 +35,15 @@ Requires Xcode or the Command Line Tools (`xcode-select --install`). Runs on mac
 
 The script builds the app, installs it straight into `/Applications/Mochi.app` and launches it. If an older Mochi is running, it is replaced with the new version.
 
+## Uninstall
+Pick **Uninstall Mochi…** from the menu. It removes the login item and settings and moves the app to the Trash.
+
+Or run this from the project folder:
+
+```bash
+./uninstall.sh
+```
+
 ## Controls
 - Click: pet the cat
 - Drag: pick it up and carry it (flick to throw)
@@ -31,3 +53,4 @@ The script builds the app, installs it straight into `/Applications/Mochi.app` a
 - `Mochi.swift`: the whole app (AppKit, single file)
 - `sprites/<breed>/*.png`: the artwork for each behavior
 - `build.sh`: builds `Mochi.app` and installs it into Applications
+- `uninstall.sh`: removes the app, its settings and its login item

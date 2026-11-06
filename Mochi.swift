@@ -2288,6 +2288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tip.isEnabled = false
         m.addItem(tip)
         m.addItem(.separator())
+        m.addItem(item(L("Mochi 삭제…", "Uninstall Mochi…"), #selector(uninstall)))
         m.addItem(item(L("종료", "Quit"), #selector(quit)))
         return m
     }
@@ -2360,6 +2361,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func toggleIcon() { hideIcon.toggle(); updateStatusItem() }
     @objc func quit() { NSApp.terminate(nil) }
+
+    /// Removes the login item and settings, moves the app to the Trash, then quits.
+    @objc func uninstall() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L("Mochi를 삭제할까요?", "Uninstall Mochi?")
+        alert.informativeText = L("앱은 휴지통으로 옮겨지고, 설정과 로그인 시 자동 실행 항목도 함께 지워져요.",
+                                  "The app will be moved to the Trash, and its settings and login item will be removed.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L("삭제", "Uninstall"))
+        alert.addButton(withTitle: L("취소", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        if #available(macOS 13.0, *) {
+            if SMAppService.mainApp.status == .enabled { try? SMAppService.mainApp.unregister() }
+        }
+        if let id = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: id)
+            UserDefaults.standard.synchronize()
+            let plist = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Preferences/\(id).plist")
+            try? FileManager.default.removeItem(at: plist)
+        }
+        let appURL = Bundle.main.bundleURL
+        NSWorkspace.shared.recycle([appURL]) { _, error in
+            DispatchQueue.main.async {
+                if error != nil {
+                    let fail = NSAlert()
+                    fail.messageText = L("휴지통으로 옮기지 못했어요", "Couldn't move Mochi to the Trash")
+                    fail.informativeText = L("Finder에서 \(appURL.path)를 직접 휴지통으로 옮겨 주세요.",
+                                             "Please drag \(appURL.path) to the Trash in Finder.")
+                    fail.runModal()
+                }
+                exit(0)
+            }
+        }
+    }
 
     func updateStatusItem() {
         if hideIcon {
