@@ -1573,9 +1573,9 @@ final class Cat {
         if app.watching && chance(0.8) { goWatch(); return }
         // 커서가 오래 가만히 있으면 곁으로 찾아감
         if app.chase && !visited && stillT > 25 && dist > 160 * s {
-            visited = true
-            startCome(.visit)
-            return
+            visited = true          // 커서가 멈춰 있는 동안 한 번만 고민함
+            let needsJumps = mouse.y - footY > 120 * s
+            if chance(needsJumps ? 0.2 : 0.4) { startCome(.visit); return }
         }
         // 졸리면 먼저 구석으로 가서 잠 (차분할수록 자주, 오래 · 밤에는 더 자주)
         let nf = nightFactor()
@@ -1583,7 +1583,7 @@ final class Cat {
         if chance(sleepChance) { goSleepInCorner(); return }
         if app.chase && chance(e.chase) {
             let high = mouse.y - footY > 200 * s || (!surface.isFloor && mouse.y < footY - 60 * s)
-            if high && dist < 1300 { startCome(.chase); return }     // 높은 곳의 커서는 발판을 밟고 쫓아감
+            if high && dist < 1300 && chance(0.25) { startCome(.chase); return }     // 높은 곳의 커서는 가끔만 발판을 밟고 쫓아감
             if dist < 420 { enter(.run); return }
         }
         if app.climb && chance(e.parkour) {
