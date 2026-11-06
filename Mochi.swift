@@ -1699,14 +1699,20 @@ final class Cat {
         tx = clampf(tx, vis.minX + 60 * s, vis.maxX - 60 * s)
         ty = min(ty, vis.maxY - 115 * s)
         if hypot(tx - cx, ty - footY) < 20 * s { arriveCome(mode); return }   // 더는 못 감
-        // 바로 밑에 진짜 창 윗면이나 바닥이 있으면 그걸 밟고, 없으면 투명 발판
-        let real = app.ground(x: tx, fromY: ty + 3 * s, allowWindows: app.climb)
-        if ty - real.y < 30 * s {
-            ty = real.y
+        let final = tx == g.x && ty == g.y
+        // 창 윗면 가까이면 발판 대신 창 윗면에 정확히 착지. 바로 밑이 바닥이면 바닥, 아니면 투명 발판
+        if let top = app.windowTopNear(x: tx, y: ty, tol: 90 * s) {
+            ty = top
         } else {
-            tx = clampf(tx, pLo, pHi)
-            app.addPlatform(x: tx, y: ty, width: 150 * s)
+            let real = app.ground(x: tx, fromY: ty + 3 * s, allowWindows: app.climb)
+            if ty - real.y < 30 * s {
+                ty = real.y
+            } else {
+                tx = clampf(tx, pLo, pHi)
+                app.addPlatform(x: tx, y: ty, width: 150 * s)
+            }
         }
+        if final && mode == .spot { comeSpot = P(tx, ty) }   // 목표를 실제 착지점으로 맞춤
         leap(to: P(tx, ty))
     }
 
@@ -2747,6 +2753,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         plats.append(Plat(minX: x - width / 2, maxX: x + width / 2, y: y, until: CACurrentMediaTime() + 6))
     }
 
+    /// x 위치에서 높이 y 근처(±tol)에 있는, 올라설 수 있는 창 윗면
+    func windowTopNear(x: CGFloat, y: CGFloat, tol: CGFloat) -> CGFloat? {
+        guard climb else { return nil }
+        let vis = screen(x: x, y: y).visibleFrame
+        var best: CGFloat? = nil
+        for (i, w) in wins.enumerated() {
+            let r = w.rect, top = r.maxY
+            guard x >= r.minX + 6, x <= r.maxX - 6, abs(top - y) < tol, top < vis.maxY - 40 else { continue }
+            if covered(P(x, top + 2), before: i) { continue }
+            if best == nil || abs(top - y) < abs(best! - y) { best = top }
+        }
+        return best
+    }
+
     func onPlatform(_ c: Cat) -> Bool {
         !c.surface.isFloor && plats.contains { abs($0.y - c.surface.y) < 1 && c.cx >= $0.minX - 2 && c.cx <= $0.maxX + 2 }
     }
@@ -2776,8 +2796,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let side: CGFloat = c.cx < m.x ? -1 : 1
         let gx = clampf(m.x + side * (55 + idx * 50) * s, vis.minX + 130 * s, vis.maxX - 130 * s)
         var gy = max(vis.minY, min(m.y - 55 * s, vis.maxY - 115 * s))
-        let g = ground(x: gx, fromY: gy + 30 * s, allowWindows: climb)
-        if gy - g.y < 45 * s { gy = g.y }      // 바로 밑에 창이나 바닥이 있으면 거기 앉음
+        if let top = windowTopNear(x: gx, y: gy, tol: 60 * s) {
+            gy = top                            // 창 윗면 근처면 그 위에 앉음
+        } else {
+            let g = ground(x: gx, fromY: gy + 30 * s, allowWindows: climb)
+            if gy - g.y < 45 * s { gy = g.y }  // 바로 밑에 바닥이 있으면 거기 앉음
+        }
         return P(gx, gy)
     }
 
