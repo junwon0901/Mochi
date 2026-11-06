@@ -6,10 +6,6 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a S
   <img src="docs/closeup-parkour.png" width="49%" alt="A ragdoll leaping off the top of a window">
   <img src="docs/closeup-peek.png" width="49%" alt="A siamese peeking out from behind a window">
 </p>
-<p>
-  <img src="docs/screenshot-parkour.png" width="49%" alt="Mochi on the desktop, jumping between windows">
-  <img src="docs/screenshot-peek.png" width="49%" alt="Mochi on the desktop, hiding behind a window">
-</p>
 
 <details>
 <summary>All poses</summary>
