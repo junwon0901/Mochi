@@ -1,12 +1,13 @@
 name: Release
 
-# Bump the VERSION file and push to main: this builds Mochi.app on macOS
-# and publishes it as Mochi.zip in the release "v<VERSION>". The app's
+# Every push to main that touches the app is built on macOS. When the
+# VERSION file names a version that has no release yet, the build is
+# published as Mochi.zip in release "v<VERSION>". The app's
 # "Check for Updates…" menu item downloads that zip.
 on:
   push:
     branches: [main]
-    paths: [VERSION, .github/workflows/release.yml]
+    paths: [VERSION, Mochi.swift, build.sh, "sprites/**", icon.png, .github/workflows/release.yml]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +28,7 @@ jobs:
         run: |
           TAG="v$(cat VERSION)"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" Mochi.zip --clobber
+            echo "Release $TAG already exists; bump VERSION to publish a new one."
           else
             gh release create "$TAG" Mochi.zip --target "$GITHUB_SHA" --title "Mochi ${TAG#v}" --generate-notes
           fi

@@ -4,6 +4,7 @@
 import AppKit
 import QuartzCore
 import ServiceManagement
+import CoreAudio
 
 // MARK: - 도우미
 
@@ -372,6 +373,46 @@ final class Updater {
     }
 }
 
+// MARK: - Time of day, sound
+
+/// Sleepier at night: 1 by day, 1.35 in the evening, 1.8 late at night
+func nightFactor() -> Double {
+    let h = Calendar.current.component(.hour, from: Date())
+    if h >= 23 || h < 6 { return 1.8 }
+    if h >= 21 { return 1.35 }
+    return 1
+}
+
+/// true while any app is playing sound through the default output (no permission needed)
+func audioPlaying() -> Bool {
+    var dev = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                                          mScope: kAudioObjectPropertyScopeGlobal,
+                                          mElement: kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &dev) == noErr else { return false }
+    var running: UInt32 = 0
+    size = UInt32(MemoryLayout<UInt32>.size)
+    addr.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
+    guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &running) == noErr else { return false }
+    return running != 0
+}
+
+/// Browsers and video players (when one of these is in front with a big window and sound is on, it's "watching")
+let videoApps: Set<String> = [
+    "com.apple.Safari", "com.google.Chrome", "com.google.Chrome.canary", "company.thebrowser.Browser",
+    "org.mozilla.firefox", "com.microsoft.edgemac", "com.brave.Browser", "com.naver.Whale",
+    "com.operasoftware.Opera", "com.vivaldi.Vivaldi", "app.zen-browser.zen", "com.kagi.kagimacOS",
+    "com.colliderli.iina", "org.videolan.vlc", "com.apple.QuickTimePlayerX", "com.apple.TV",
+    "com.firecore.infuse", "com.netflix.Netflix",
+]
+
+/// Why the cat is travelling: chase the cursor, visit an idle cursor, greet after wake, or go to a spot
+enum ComeMode { case chase, visit, greet, spot }
+
+/// Invisible stepping stone the cat makes for itself in mid-air
+struct Plat { let minX: CGFloat; let maxX: CGFloat; let y: CGFloat; var until: Double }
+
 // MARK: - 털색 (랙돌 포인트 컬러)
 
 enum PointColor: String, CaseIterable {
@@ -443,8 +484,8 @@ func headUnit(_ pose: Pose) -> CGPoint {
 // MARK: - 스프라이트 (그림 파일로 그리는 고양이)
 
 /// 캔버스 여백 (단위). 고양이 논리 영역은 100x100, 실제 창은 좌우로 MX, 위로 MT만큼 더 큼
-let MX: CGFloat = 70
-let MT: CGFloat = 62
+let MX: CGFloat = 100
+let MT: CGFloat = 120
 /// 그림 1px(앱에 넣은 절반 크기 기준)이 몇 단위인지
 let spriteK: CGFloat = 0.3125
 
@@ -1202,7 +1243,7 @@ struct Energy {
 }
 
 struct Surface { var minX: CGFloat; var maxX: CGFloat; var y: CGFloat; var isFloor: Bool }
-struct Win { let rect: CGRect; let id: Int }
+struct Win { let rect: CGRect; let id: Int; var pid: Int = 0 }
 
 enum HideKind { case top, bottom, left, right, cornerL, cornerR }
 struct PeekSpot {
@@ -1219,7 +1260,7 @@ enum HidePhase { case sinking, walkingIn, peeking }
 
 enum CatState {
     case idle, walk, run, crouch, jump, fall, sleep, groom, stretch, dragged, happy, surprised
-    case knead, roll, spin, hide, hang, zoom, land, yawn
+    case knead, roll, spin, hide, hang, zoom, land, yawn, watch
 }
 
 final class CatWindow: NSWindow {
@@ -1288,6 +1329,14 @@ final class Cat {
     var hangW: CGFloat = 0
     var prevMouse = CGPoint.zero
     var prevMouseV = CGPoint.zero
+    // 투명 발판으로 이동 · 커서 찾아가기 · 같이 보기
+    var comeMode: ComeMode?
+    var comeSpot = CGPoint.zero
+    var trekHops = 0
+    var waitingCursor = false
+    var waitSleepAt: Double = 25
+    var visited = false
+    var pendingWatch = false
 
     var R: CGFloat { (Sprites.shared.ok ? 17 : 21) * s }
     /// 숨을 때 머리를 더 깊이 넣어야 하는 배수 (그림은 귀와 털이 큼)
@@ -1333,7 +1382,9 @@ final class Cat {
             idleKey = ["sit", "front", "lookup", "tilt", "blink"].randomElement()!
             loafKey = chance(0.5) ? "loaf" : "loafclosed"
             askedTilt = false
-        case .sleep: stateDur = dur ?? Double.random(in: app.energy.sleepDur)
+            waitingCursor = false
+        case .sleep: stateDur = dur ?? Double.random(in: app.energy.sleepDur) * nightFactor()
+        case .watch: stateDur = Double.random(in: 240...480) / nightFactor()
         case .groom: stateDur = Double.random(in: 3...6)
         case .stretch: stateDur = 1.8
         case .happy: stateDur = 2.6
@@ -1368,10 +1419,12 @@ final class Cat {
         if launchRect != nil { restoreLevel() }
         if pendingSleep && g.isFloor {
             goSleepInCorner()
+        } else if pendingWatch && g.isFloor {
+            goWatch()
         } else if state == .fall && fallStartY - g.y > 350 {
             enter(.surprised)
-        } else if state == .jump {
-            if parkourHops > 0 { parkourHops -= 1 }
+        } else if state == .jump || comeMode != nil {
+            if comeMode == nil && parkourHops > 0 { parkourHops -= 1 }
             enter(.land)
         } else {
             enter(.idle, dur: Double.random(in: 1.2...3.5))
@@ -1380,7 +1433,10 @@ final class Cat {
 
     var margin: CGFloat { surface.isFloor ? 45 * s : 12 * s }
 
-    func clearPlans() { pendingSleep = false; pendingSide = nil; pendingJump = nil; parkourHops = 0 }
+    func clearPlans() {
+        pendingSleep = false; pendingSide = nil; pendingJump = nil; parkourHops = 0
+        comeMode = nil; trekHops = 0; pendingWatch = false; waitingCursor = false
+    }
 
     /// 창 사이를 건물 옥상처럼 뛰어다니기: 가장자리까지 달려가서 → 웅크렸다가 → 다음 창으로 점프
     @discardableResult
@@ -1388,6 +1444,11 @@ final class Cat {
         guard app.climb, let tg = app.parkourTarget(cx: cx, footY: footY, surface: surface, s: s) else {
             parkourHops = 0
             return false
+        }
+        let rise = tg.y - footY
+        if rise > 170 * s || (rise > 90 * s && abs(tg.x - cx) > 420 * s) {
+            startCome(.spot, spot: tg)      // 한 번에 못 가는 곳은 투명 발판을 밟고 올라감
+            return true
         }
         let dir: CGFloat = tg.x > cx ? 1 : -1
         var takeoff: CGFloat
@@ -1461,10 +1522,23 @@ final class Cat {
     func chooseNext(_ mouse: CGPoint) {
         let dist = hypot(mouse.x - cx, mouse.y - footY)
         let e = app.energy
-        // 졸리면 먼저 구석으로 가서 잠 (차분할수록 자주, 오래)
-        let sleepChance = min(e.sleepCap, e.sleepBase + awake / e.awakeDiv)
+        // 영상을 보고 있으면 옆에 와서 같이 봄
+        if app.watching && chance(0.8) { goWatch(); return }
+        // 커서가 오래 가만히 있으면 곁으로 찾아감
+        if app.chase && !visited && stillT > 25 && dist > 160 * s {
+            visited = true
+            startCome(.visit)
+            return
+        }
+        // 졸리면 먼저 구석으로 가서 잠 (차분할수록 자주, 오래 · 밤에는 더 자주)
+        let nf = nightFactor()
+        let sleepChance = min(nf > 1 ? min(0.92, e.sleepCap * 1.25) : e.sleepCap, (e.sleepBase + awake / e.awakeDiv) * nf)
         if chance(sleepChance) { goSleepInCorner(); return }
-        if app.chase && dist < 420 && chance(e.chase) { enter(.run); return }
+        if app.chase && chance(e.chase) {
+            let high = mouse.y - footY > 200 * s || (!surface.isFloor && mouse.y < footY - 60 * s)
+            if high && dist < 1300 { startCome(.chase); return }     // 높은 곳의 커서는 발판을 밟고 쫓아감
+            if dist < 420 { enter(.run); return }
+        }
         if app.climb && chance(e.parkour) {
             parkourHops = Int.random(in: e.hops)
             if startParkourHop() { return }
@@ -1485,7 +1559,24 @@ final class Cat {
             }
         }
         if app.climb && chance(e.climb), let tg = app.jumpTarget(fromX: cx, footY: footY, s: s) {
-            jump(toX: tg.x, landY: tg.y)
+            if tg.y - footY > 170 * s { startCome(.spot, spot: tg) } else { jump(toX: tg.x, landY: tg.y) }
+            return
+        }
+        // 허공에 발판을 만들며 높은 곳으로 놀러 가기
+        if app.climb && chance(e.climb * 0.6) {
+            let vis = app.screen(x: cx, y: footY + 1).visibleFrame
+            let ty = min(footY + CGFloat.random(in: 220...520) * s, vis.maxY - 130 * s)
+            if ty > footY + 120 * s {
+                let tx = clampf(cx + CGFloat.random(in: 150...500) * s * (Bool.random() ? 1 : -1), vis.minX + 80 * s, vis.maxX - 80 * s)
+                startCome(.spot, spot: P(tx, ty))
+                return
+            }
+        }
+        // 투명 발판 위에서는 발판을 밟으며 내려옴
+        if app.onPlatform(self) && chance(0.35) {
+            let vis = app.screen(x: cx, y: footY + 1).visibleFrame
+            let tx = clampf(cx + CGFloat.random(in: 120...420) * s * (Bool.random() ? 1 : -1), vis.minX + 60 * s, vis.maxX - 60 * s)
+            startCome(.spot, spot: P(tx, app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb).y))
             return
         }
         if !surface.isFloor && chance(0.2) {
@@ -1510,7 +1601,155 @@ final class Cat {
         zoomLeft = Int.random(in: 3...5)
         targetX = Bool.random() ? surface.minX + margin : surface.maxX - margin
         enter(.zoom)
-        emit(L("다다다", "zoom!"), color: rgb(0x8A7BD8), size: 9, dy: 18, vel: P(0, 8), life: 1.0)
+    }
+
+    // MARK: 투명 발판으로 이동
+
+    func startCome(_ mode: ComeMode, spot: CGPoint = .zero) {
+        let hops = parkourHops
+        clearPlans()
+        if mode == .spot { parkourHops = hops }
+        comeMode = mode
+        comeSpot = spot
+        trekHops = 0
+        continueCome()
+    }
+
+    private func comeGoal() -> CGPoint {
+        if comeMode == .spot { return comeSpot }
+        return app.cursorGoal(for: self, mouse: NSEvent.mouseLocation)
+    }
+
+    /// 목표까지 한 단계: 같은 높이면 걸어가고, 아니면 허공에 투명 발판을 만들어 폴짝
+    func continueCome() {
+        guard let mode = comeMode else { enter(.idle); return }
+        let g = comeGoal()
+        let dx = g.x - cx, dy = g.y - footY
+        if abs(dy) < 14 * s && abs(dx) < 30 * s { arriveCome(mode); return }
+        if abs(dy) < 14 * s && g.x > surface.minX + 4 * s && g.x < surface.maxX - 4 * s {
+            targetX = g.x
+            enter(.walk)
+            return
+        }
+        trekHops += 1
+        if trekHops > 16 { arriveCome(mode); return }
+        let vis = app.screen(x: cx, y: footY + 1).visibleFrame
+        let stepX = CGFloat.random(in: 170...250) * s
+        let stepUp = CGFloat.random(in: 130...190) * s
+        var tx: CGFloat
+        var ty: CGFloat
+        if abs(dx) <= stepX * 1.7 && dy <= stepUp * 1.3 && dy > -520 {
+            tx = g.x
+            ty = g.y
+        } else if dy > 0 {
+            ty = footY + min(dy, stepUp)
+            if abs(dx) < stepX * 0.6 {
+                // 거의 수직이면 계단처럼 좌우로 지그재그
+                let side: CGFloat = trekHops % 2 == 0 ? 1 : -1
+                tx = cx + side * CGFloat.random(in: 90...150) * s
+            } else {
+                tx = cx + clampf(dx, -stepX, stepX)
+            }
+        } else {
+            ty = max(g.y, footY - 360 * s)
+            tx = cx + clampf(dx, -stepX * 1.6, stepX * 1.6)
+        }
+        tx = clampf(tx, vis.minX + 60 * s, vis.maxX - 60 * s)
+        ty = min(ty, vis.maxY - 115 * s)
+        if hypot(tx - cx, ty - footY) < 20 * s { arriveCome(mode); return }   // 더는 못 감
+        // 바로 밑에 진짜 창 윗면이나 바닥이 있으면 그걸 밟고, 없으면 투명 발판
+        let real = app.ground(x: tx, fromY: ty + 3 * s, allowWindows: app.climb)
+        if ty - real.y < 30 * s {
+            ty = real.y
+        } else {
+            app.addPlatform(x: tx, y: ty, width: 150 * s)
+        }
+        leap(to: P(tx, ty))
+    }
+
+    private func leap(to tg: CGPoint) {
+        let top = app.screen(x: tg.x, y: tg.y).visibleFrame.maxY
+        let low = max(tg.y, footY)
+        let peak = min(low + CGFloat.random(in: 40...80) * s, top - 95 * s)
+        grabbing = false
+        pounce = P(tg.x, max(peak, low + 20))
+        pounceLand = tg.y
+        facingRight = tg.x >= cx
+        enter(.crouch, dur: 0.25)
+    }
+
+    private func arriveCome(_ mode: ComeMode) {
+        comeMode = nil
+        trekHops = 0
+        let m = NSEvent.mouseLocation
+        switch mode {
+        case .chase:
+            arrivedChase(m)
+        case .greet:
+            facingRight = m.x >= cx
+            enter(.happy)
+        case .visit:
+            facingRight = m.x >= cx
+            enter(.idle, dur: 3600)
+            idlePose = .sit
+            idleKey = "front"
+            waitingCursor = true
+            waitSleepAt = Double.random(in: 18...40) / nightFactor()
+        case .spot:
+            if parkourHops > 0 { parkourHops -= 1 }
+            enter(.land)
+        }
+    }
+
+    /// 맥을 깨우면 반갑게 달려옴
+    func greet() {
+        switch state {
+        case .dragged, .hang, .jump, .fall, .crouch: return
+        default: break
+        }
+        awake = 0
+        emit("!", color: rgb(0xFF5A5A), size: 16, dy: 22, vel: P(0, 8), life: 0.9)
+        if state == .hide {
+            abortHide()
+            clearPlans()
+            comeMode = .greet
+            return
+        }
+        startCome(.greet)
+    }
+
+    // MARK: 같이 보기
+
+    func startWatchingIfFree() {
+        switch state {
+        case .idle, .groom, .knead, .roll, .spin, .happy, .land, .stretch: break
+        case .walk:
+            if comeMode != nil || pendingJump != nil || pendingSide != nil || pendingSleep { return }
+        default: return
+        }
+        clearPlans()
+        goWatch()
+    }
+
+    /// 영상 창 아래 모서리 쪽으로 가서 앉아 화면을 올려다봄
+    func goWatch() {
+        guard app.watching else { enter(.idle); return }
+        let (x, fr) = app.watchSpot(for: self)
+        if !surface.isFloor {
+            pendingWatch = true
+            targetX = Bool.random() ? surface.maxX + 30 * s : surface.minX - 30 * s
+            enter(.walk)
+            return
+        }
+        targetX = clampf(x, surface.minX + 45 * s, surface.maxX - 45 * s)
+        if abs(targetX - cx) < 6 * s {
+            pendingWatch = false
+            facingRight = fr
+            enter(.watch)
+        } else {
+            pendingWatch = true
+            enter(.walk)
+        }
     }
 
     func arrivedChase(_ m: CGPoint) {
@@ -1664,9 +1903,6 @@ final class Cat {
                 if abs(step.0 - peek) < 0.01 {
                     planHold = step.1
                     plan.removeFirst()
-                    if step.0 >= 1 && chance(0.3) {
-                        emit(L("빼꼼", "peek"), color: rgb(0x6E6880), size: 9, dy: 26, vel: P(0, 8), life: 1.3)
-                    }
                 }
             } else {
                 nextSpot()
@@ -1688,7 +1924,6 @@ final class Cat {
         prevMouse = m
         prevMouseV = .zero
         enter(.hang)
-        emit(chance(0.5) ? "잡았다!" : "냥!", color: rgb(0x6E6880), size: 9, dy: 4, vel: P(0, 10), life: 1.2)
     }
 
     /// 커서에 매달린 진자: 커서를 흔들면(가속) 몸이 반대로 쏠렸다가 흔들흔들
@@ -1721,6 +1956,8 @@ final class Cat {
             stateDur = max(stateDur, stateT + 3)
         case .jump, .fall, .dragged, .crouch: break
         default:
+            comeMode = nil
+            pendingWatch = false
             enter(.happy)
         }
     }
@@ -1807,6 +2044,7 @@ final class Cat {
         var moved = false
 
         if hypot(mouse.x - lastMouse.x, mouse.y - lastMouse.y) > 2 { stillT = 0; lastMouse = mouse } else { stillT += dt }
+        if stillT < 1 { visited = false }
 
         switch state {
         case .idle:
@@ -1822,19 +2060,45 @@ final class Cat {
                 emit("?", color: rgb(0x8A7BD8), size: 12, dy: 22, vel: P(0, 8), life: 1.2)
             }
             if stillT > 4 && near { stateDur = max(stateDur, stateT + 1) }   // 커서가 곁에 있으면 계속 쳐다봄
+            if waitingCursor {
+                // 커서 옆에서 기다리다가 그대로 잠듦
+                if abs(mouse.x - cx) > 10 * s { facingRight = mouse.x > cx }
+                if stillT < 0.3 {
+                    waitingCursor = false
+                    stateDur = stateT + Double.random(in: 1.5...3)
+                } else if stateT > waitSleepAt {
+                    waitingCursor = false
+                    awake = 0
+                    enter(.sleep, dur: Double.random(in: 60...180) * nightFactor())
+                } else {
+                    if stateT > 10 {
+                        idlePose = .loaf
+                        loafKey = stateT > waitSleepAt - 6 ? "loafclosed" : "loaf"
+                    }
+                    stateDur = max(stateDur, stateT + 1)
+                }
+            }
+            if app.musicPlaying && idlePose != .loaf && chance(dt * 0.22) {
+                emit("♪", color: rgb(0x8A7BD8), size: 11, dy: 22, vel: P(6, 12), life: 1.6)
+            }
 
         case .walk, .run:
             awake += dt
             if state == .run {
                 targetX = clampf(mouse.x, surface.minX + margin, surface.maxX - margin)
             }
-            let speed: CGFloat = (state == .run || pendingJump != nil ? 230 : (pendingSide != nil ? 110 : 65)) * s
+            let fast = state == .run || pendingJump != nil || comeMode == .chase || comeMode == .greet
+            let speed: CGFloat = (fast ? 230 : (pendingSide != nil || comeMode != nil ? 110 : 65)) * s
             let dx = targetX - cx
             if abs(dx) < 3 * s {
                 if state == .run {
                     arrivedChase(mouse)
                 } else if pendingJump != nil {
                     beginLeap()
+                } else if comeMode != nil {
+                    continueCome()
+                } else if pendingWatch && surface.isFloor {
+                    goWatch()
                 } else if let e = pendingSide {
                     beginWalkIn(e)
                 } else if pendingSleep && surface.isFloor {
@@ -1937,7 +2201,6 @@ final class Cat {
 
         case .knead:
             fxT += dt
-            if fxT > 1.6 { fxT = 0; emit(L("꾹꾹", "knead"), color: rgb(0xC48A7A), size: 8, dy: 4, vel: P(6, 8), life: 1.1, dx: 6) }
             if stateT > stateDur { enter(.idle) }
 
         case .roll:
@@ -1952,14 +2215,21 @@ final class Cat {
             }
 
         case .groom, .surprised:
-            if stateT > stateDur { enter(.idle) }
+            if stateT > stateDur { if comeMode != nil { continueCome() } else { enter(.idle) } }
+
+        case .watch:
+            awake += dt * 0.3
+            if !app.watching { enter(.stretch) }
+            else if stateT > stateDur { awake = 0; enter(.sleep) }
 
         case .yawn:
             if stateT > stateDur { enter(.stretch) }
 
         case .land:
             if stateT > stateDur {
-                if parkourHops > 0 && startParkourHop() {} else { enter(.idle, dur: Double.random(in: 1.2...3)) }
+                if comeMode != nil { continueCome() }
+                else if parkourHops > 0 && startParkourHop() {}
+                else { enter(.idle, dur: Double.random(in: 1.2...3)) }
             }
 
         case .stretch:
@@ -2037,6 +2307,7 @@ final class Cat {
         case .knead: v.pose = .loaf
         case .roll: v.pose = .roll
         case .hang: v.pose = .hang
+        case .watch: v.pose = stateT > 120 ? .loaf : .sit
         case .hide:
             switch hidePhase {
             case .sinking: v.pose = .sit
@@ -2050,7 +2321,8 @@ final class Cat {
         v.animT = CGFloat(stateT)
 
         // 그림 고르기
-        let running = state == .run || state == .zoom || (state == .walk && (pendingJump != nil || pendingSide != nil))
+        let running = state == .run || state == .zoom
+            || (state == .walk && (pendingJump != nil || pendingSide != nil || comeMode == .chase || comeMode == .greet))
         let walking = running || state == .walk || state == .spin
         if walking { strideT += dt * (running ? 9 : 6.5) }
         let frame = Int(strideT) % 4
@@ -2081,6 +2353,13 @@ final class Cat {
         case .happy: key = "blink"
         case .surprised: key = "startle"
         case .knead: key = "loaf"
+        case .watch:
+            // 화면을 올려다보다가, 갸웃했다가, 가끔 앞발로 툭. 오래 보면 식빵 자세로 졸기
+            let c = stateT.truncatingRemainder(dividingBy: 18)
+            if stateT > 120 { key = stateT > 200 ? "loafclosed" : "loaf" }
+            else if stateT > 15 && c > 15.5 && c < 16.4 { key = "play" }
+            else if c > 9 && c < 11 { key = "tilt" }
+            else { key = "lookup" }
         case .hide:
             switch hidePhase {
             case .sinking: key = "sit"
@@ -2149,6 +2428,7 @@ final class Cat {
             tiltGoal = CGFloat(sin(t * 3)) * 7
         case .idle:
             if askedTilt && stillT > 1.5 { tiltGoal = 14 }   // 갸웃?
+            else if app.musicPlaying && idlePose != .loaf { tiltGoal = CGFloat(sin(t * 4.2)) * 14 }   // 음악에 맞춰 까딱
         case .jump, .fall:
             if Sprites.shared.ok { tiltGoal = clampf(vel.y * 0.008, -14, 14) * (facingRight ? 1 : -1) }
         case .hide:
@@ -2208,10 +2488,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var language: String { get { d.string(forKey: "language") ?? "system" } set { d.set(newValue, forKey: "language") } }
     var energyLevel: Int { get { d.integer(forKey: "energy") } set { d.set(newValue, forKey: "energy") } }
     var energy: Energy { Energy.levels[max(0, min(2, energyLevel))] }
+    var watchEnabled: Bool { get { d.bool(forKey: "watch") } set { d.set(newValue, forKey: "watch") } }
+
+    var plats: [Plat] = []          // 고양이가 허공에 만든 투명 발판
+    var watching = false            // 영상 시청 중
+    var musicPlaying = false        // 음악만 나오는 중
+    var watchRect = CGRect.zero
+    var videoT: Double = 0, noVideoT: Double = 0, musicT: Double = 0, noMusicT: Double = 0
+    var lastGreet: Double = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
         d.register(defaults: ["scale": 0.8, "chase": true, "climb": true, "hide": true,
-                              "hideIcon": false, "cats": ["blue"], "energy": 0])
+                              "hideIcon": false, "cats": ["blue"], "energy": 0, "watch": true])
         refreshWindows()
         var list = (d.stringArray(forKey: "breeds") ?? []).compactMap { Breed(rawValue: $0) }
         if list.isEmpty { list = [.ragdoll] }
@@ -2221,6 +2509,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(tm, forMode: .common)
         timer = tm
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { Updater.shared.checkDaily() }
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
+        nc.addObserver(self, selector: #selector(didWake(_:)), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(didWake(_:)),
+                                                            name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+    }
+
+    /// 잠자기·잠금에서 돌아오면 고양이들이 반갑게 달려옴
+    @objc func didWake(_ n: Notification) {
+        let now = CACurrentMediaTime()
+        guard now - lastGreet > 20 else { return }
+        lastGreet = now
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.cats.forEach { $0.greet() }
+        }
     }
 
     func spawn(_ c: Breed, offset: CGFloat = 0) {
@@ -2237,7 +2540,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dt = min(0.05, now - lastTick)
         lastTick = now
         winT += dt
-        if winT > 0.5 { winT = 0; refreshWindows() }
+        if winT > 0.5 { winT = 0; refreshWindows(); updateMedia(0.5) }
+        updatePlatforms()
         for c in cats { c.update(dt) }
     }
 
@@ -2261,7 +2565,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                   let bd = info[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: bd as CFDictionary) else { continue }
             guard r.width >= 160, r.height >= 90 else { continue }
-            out.append(Win(rect: CGRect(x: r.minX, y: mainH - r.maxY, width: r.width, height: r.height), id: num))
+            let pid = info[kCGWindowOwnerPID as String] as? Int ?? 0
+            out.append(Win(rect: CGRect(x: r.minX, y: mainH - r.maxY, width: r.width, height: r.height), id: num, pid: pid))
         }
         wins = out
     }
@@ -2280,6 +2585,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func ground(x: CGFloat, fromY: CGFloat, allowWindows: Bool) -> Surface {
         let vis = screen(x: x, y: fromY).visibleFrame
         var best = Surface(minX: vis.minX, maxX: vis.maxX, y: vis.minY, isFloor: true)
+        for p in plats {
+            guard x >= p.minX, x <= p.maxX, p.y <= fromY + 1, p.y > best.y else { continue }
+            best = Surface(minX: p.minX, maxX: p.maxX, y: p.y, isFloor: false)
+        }
         guard allowWindows else { return best }
         for (i, w) in wins.enumerated() {
             let r = w.rect, top = r.maxY
@@ -2335,6 +2644,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !cands.isEmpty else { return nil }
         cands.sort { $0.1 < $1.1 }
         return cands.prefix(3).randomElement()?.0
+    }
+
+    // MARK: 투명 발판
+
+    func addPlatform(x: CGFloat, y: CGFloat, width: CGFloat) {
+        plats.append(Plat(minX: x - width / 2, maxX: x + width / 2, y: y, until: CACurrentMediaTime() + 6))
+    }
+
+    func onPlatform(_ c: Cat) -> Bool {
+        !c.surface.isFloor && plats.contains { abs($0.y - c.surface.y) < 1 && c.cx >= $0.minX - 2 && c.cx <= $0.maxX + 2 }
+    }
+
+    /// 고양이가 올라가 있는 발판은 유지, 비어 있는 발판은 잠시 뒤 사라짐
+    func updatePlatforms() {
+        guard !plats.isEmpty else { return }
+        let now = CACurrentMediaTime()
+        for i in plats.indices {
+            let p = plats[i]
+            let used = cats.contains { c in
+                switch c.state {
+                case .jump, .fall, .dragged, .hang, .hide: return false
+                default: return !c.surface.isFloor && abs(c.surface.y - p.y) < 1 && c.cx >= p.minX - 2 && c.cx <= p.maxX + 2
+                }
+            }
+            if used { plats[i].until = max(p.until, now + 2.5) }
+        }
+        plats.removeAll { $0.until < now }
+    }
+
+    /// 커서 바로 옆, 고양이가 앉을 자리 (발 위치)
+    func cursorGoal(for c: Cat, mouse m: CGPoint) -> CGPoint {
+        let s = c.s
+        let vis = screen(x: m.x, y: m.y).visibleFrame
+        let idx = CGFloat(cats.firstIndex { $0 === c } ?? 0)
+        let side: CGFloat = c.cx < m.x ? -1 : 1
+        let gx = clampf(m.x + side * (55 + idx * 50) * s, vis.minX + 60 * s, vis.maxX - 60 * s)
+        var gy = max(vis.minY, min(m.y - 55 * s, vis.maxY - 115 * s))
+        let g = ground(x: gx, fromY: gy + 30 * s, allowWindows: climb)
+        if gy - g.y < 45 * s { gy = g.y }      // 바로 밑에 창이나 바닥이 있으면 거기 앉음
+        return P(gx, gy)
+    }
+
+    // MARK: 같이 보기
+
+    /// 소리가 나고, 앞에 있는 브라우저·영상 앱 창이 크면 "영상 보는 중". 소리만 나면 "음악"
+    func updateMedia(_ dt: Double) {
+        let audio = watchEnabled && audioPlaying()
+        var video: CGRect? = nil
+        if audio, let front = NSWorkspace.shared.frontmostApplication,
+           videoApps.contains(front.bundleIdentifier ?? "") {
+            let pid = Int(front.processIdentifier)
+            let mine = wins.filter { $0.pid == pid }
+            if let big = mine.max(by: { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }) {
+                let f = screen(x: big.rect.midX, y: big.rect.midY).frame
+                if big.rect.width * big.rect.height >= f.width * f.height * 0.3 { video = big.rect }
+            }
+        }
+        if let r = video { watchRect = r; videoT += dt; noVideoT = 0 } else { noVideoT += dt; videoT = 0 }
+        let was = watching
+        if !watching && videoT >= 3 { watching = true }
+        if watching && noVideoT >= 5 { watching = false }
+        let music = audio && video == nil
+        if music { musicT += dt; noMusicT = 0 } else { noMusicT += dt; musicT = 0 }
+        if !musicPlaying && musicT >= 3 { musicPlaying = true }
+        if musicPlaying && noMusicT >= 4 { musicPlaying = false }
+        if watching && !was { for c in cats { c.startWatchingIfFree() } }
+    }
+
+    /// 영상 창 아래 모서리 근처 자리와 바라볼 방향
+    func watchSpot(for c: Cat) -> (CGFloat, Bool) {
+        let r = watchRect
+        let vis = screen(x: r.midX, y: r.midY).visibleFrame
+        let idx = CGFloat(cats.firstIndex { $0 === c } ?? 0)
+        let lo = max(r.minX, vis.minX) + (70 + idx * 60) * c.s
+        let hi = min(r.maxX, vis.maxX) - (70 + idx * 60) * c.s
+        let left = abs(c.cx - lo) <= abs(c.cx - hi)
+        return (left ? lo : hi, left)
     }
 
     /// 고양이가 올라가 있는 창
@@ -2442,6 +2828,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(item(L("커서 쫓아가기 · 매달리기", "Chase & hang on the cursor"), #selector(toggleChase), on: chase))
         m.addItem(item(L("창 사이 뛰어다니기 (파쿠르)", "Jump between windows (parkour)"), #selector(toggleClimb), on: climb))
         m.addItem(item(L("창 뒤에 숨기", "Hide behind windows"), #selector(toggleHide), on: hideEnabled))
+        m.addItem(item(L("영상 같이 보기 · 음악에 반응", "Watch videos & react to music"), #selector(toggleWatch), on: watchEnabled))
         m.addItem(.separator())
         if #available(macOS 13.0, *) {
             m.addItem(item(L("로그인 시 자동 실행", "Open at login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
@@ -2516,6 +2903,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func toggleClimb() {
         climb.toggle()
         if !climb { for c in cats where !c.surface.isFloor && c.state != .hide { c.startFall() } }
+    }
+    @objc func toggleWatch() {
+        watchEnabled.toggle()
+        if !watchEnabled {
+            watching = false
+            musicPlaying = false
+            for c in cats where c.state == .watch { c.enter(.stretch) }
+        }
     }
     @objc func toggleHide() {
         hideEnabled.toggle()

@@ -12,6 +12,10 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a S
 - Parkour: leaps between windows like jumping across rooftops
 - Hides behind windows and peeks out from the top, the sides, the bottom (upside down) and near the corners
 - Chases your cursor, wiggles its bottom and pounces, or hangs from the cursor (shake the cursor and it swings)
+- Builds invisible stepping stones in mid-air to climb up to high windows or to your cursor, one hop at a time
+- Leave the cursor still for a while and it comes over, waits next to it, then dozes off there
+- Watches videos with you: when a browser or video player is playing with a big window, it sits by the screen and looks up at it. With music only, it bobs its head
+- Gets sleepier at night, and runs over to greet you when you wake or unlock your Mac
 - Pick it up and carry it, or throw it
 - Several cats at once, each with its own breed
 - Settings: activity level (calm / normal / playful), size, language (system / 한국어 / English), open at login
@@ -28,7 +32,7 @@ The script builds the app, installs it straight into `/Applications/Mochi.app` a
 ## Updates
 Mochi checks GitHub for a new release once a day and asks before updating. You can also pick **Check for Updates…** from the menu. Updating downloads the new build, replaces the app and restarts it, so you don't need the project folder for this either.
 
-To publish a new version, bump the number in `VERSION` and push to `main`. A GitHub Action builds `Mochi.app` on macOS and publishes `Mochi.zip` as release `v<VERSION>`.
+Every push to `main` is built on macOS by a GitHub Action. To publish a new version, bump the number in `VERSION`; the build is then published as `Mochi.zip` in release `v<VERSION>`.
 
 ## Uninstall
 You don't need the project folder to remove Mochi. Once it is installed, you can delete the folder.
@@ -47,4 +51,4 @@ You don't need the project folder to remove Mochi. Once it is installed, you can
 - `sprites/<breed>/*.png`: the artwork for each behavior
 - `build.sh`: builds `Mochi.app` and installs it into Applications
 - `uninstall.sh`: removes the app, its settings and its login item
-- `VERSION`: the app version; `.github/workflows/release.yml` builds a release whenever it changes
+- `VERSION`: the app version; `.github/workflows/release.yml` builds every push and publishes new versions
