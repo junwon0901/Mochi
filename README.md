@@ -14,7 +14,7 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a S
 - Chases your cursor, wiggles its bottom and pounces, or hangs from the cursor (shake the cursor and it swings)
 - Builds invisible stepping stones in mid-air to climb up to high windows or to your cursor, one hop at a time
 - Leave the cursor still for a while and it comes over, waits next to it, then dozes off there
-- Watches videos with you: when a browser or video player is playing with a big window, it sits by the screen and looks up at it. With music only, it bobs its head
+- Watches videos with you: when a browser or video player is playing with a big window, it sits by the screen and looks up at it. With music only, it bobs its head. A sudden sound wakes a sleeping cat with a start
 - Gets sleepier at night, and runs over to greet you when you wake or unlock your Mac
 - Pick it up and carry it, or throw it
 - Several cats at once, each with its own breed

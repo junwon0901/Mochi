@@ -1800,6 +1800,14 @@ final class Cat {
         if o.0 == "play" { facingRight = m.x > cx }
     }
 
+    /// 갑자기 난 소리에 깜짝 놀라 깸
+    func wakeStartled() {
+        guard state == .sleep else { return }
+        awake = 0
+        facingRight.toggle()        // 소리 난 쪽으로 홱 돌아봄
+        enter(.surprised)
+    }
+
     /// 맥을 깨우면 반갑게 달려옴
     func greet() {
         switch state {
@@ -2639,6 +2647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var musicPlaying = false        // 음악만 나오는 중
     var watchRect = CGRect.zero
     var videoT: Double = 0, noVideoT: Double = 0, musicT: Double = 0, noMusicT: Double = 0
+    var silentT: Double = 0          // 소리가 안 난 시간
     var lastGreet: Double = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -2853,6 +2862,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 소리가 나고, 앞에 있는 브라우저·영상 앱 창이 크면 "영상 보는 중". 소리만 나면 "음악"
     func updateMedia(_ dt: Double) {
         let audio = watchEnabled && audioPlaying()
+        // 조용하다가 소리가 나기 시작하면 자던 고양이가 깜짝 놀라 깸
+        if audio {
+            if silentT >= 2 {
+                for c in cats where c.state == .sleep {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0...0.3)) { c.wakeStartled() }
+                }
+            }
+            silentT = 0
+        } else {
+            silentT += dt
+        }
         var video: CGRect? = nil
         if audio, let front = NSWorkspace.shared.frontmostApplication,
            videoApps.contains(front.bundleIdentifier ?? "") {
@@ -2990,7 +3010,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(item(L("커서 쫓아가기 · 매달리기", "Chase & hang on the cursor"), #selector(toggleChase), on: chase))
         m.addItem(item(L("창 사이 뛰어다니기 (파쿠르)", "Jump between windows (parkour)"), #selector(toggleClimb), on: climb))
         m.addItem(item(L("창 뒤에 숨기", "Hide behind windows"), #selector(toggleHide), on: hideEnabled))
-        m.addItem(item(L("영상 같이 보기 · 음악에 반응", "Watch videos & react to music"), #selector(toggleWatch), on: watchEnabled))
+        m.addItem(item(L("영상 같이 보기 · 소리에 반응", "Watch videos & react to sound"), #selector(toggleWatch), on: watchEnabled))
         m.addItem(.separator())
         if #available(macOS 13.0, *) {
             m.addItem(item(L("로그인 시 자동 실행", "Open at login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
