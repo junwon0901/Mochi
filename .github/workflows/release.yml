@@ -1,0 +1,33 @@
+name: Release
+
+# Push a tag like v1.2.0 (matching the VERSION file) to build Mochi.app
+# on macOS and attach Mochi.zip to a GitHub release. The app's
+# "Check for Updates…" menu item downloads that zip.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: MOCHI_NO_INSTALL=1 ./build.sh
+      - name: Package
+        run: ditto -c -k --keepParent dist/Mochi.app Mochi.zip
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then TAG="v$(cat VERSION)"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Mochi.zip --clobber
+          else
+            gh release create "$TAG" Mochi.zip --title "Mochi ${TAG#v}" --generate-notes
+          fi

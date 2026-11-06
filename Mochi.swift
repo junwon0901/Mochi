@@ -202,6 +202,176 @@ func isKorean() -> Bool {
 /// 한국어 / 영어 문구 고르기
 func L(_ ko: String, _ en: String) -> String { isKorean() ? ko : en }
 
+// MARK: - Updates
+
+/// Checks GitHub Releases for a newer build and installs it in place.
+@MainActor
+final class Updater {
+    static let shared = Updater()
+    let repo = "junwon0901/Mochi"
+    private var busy = false
+
+    var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    /// true if version a is newer than b ("1.10" > "1.9")
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            let t = s.hasPrefix("v") ? String(s.dropFirst()) : s
+            return t.split(separator: ".").map { Int($0.filter { $0.isNumber }) ?? 0 }
+        }
+        let x = parts(a), y = parts(b)
+        for i in 0..<max(x.count, y.count) {
+            let p = i < x.count ? x[i] : 0
+            let q = i < y.count ? y[i] : 0
+            if p != q { return p > q }
+        }
+        return false
+    }
+
+    /// Checks once a day at most, quietly (only speaks up when there is an update).
+    func checkDaily() {
+        let d = UserDefaults.standard
+        let last = d.double(forKey: "lastUpdateCheck")
+        let now = Date().timeIntervalSince1970
+        if now - last < 24 * 3600 { return }
+        d.set(now, forKey: "lastUpdateCheck")
+        check(userInitiated: false)
+    }
+
+    func check(userInitiated: Bool) {
+        if busy { return }
+        busy = true
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest") else { busy = false; return }
+        var req = URLRequest(url: url)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Mochi-Updater", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 20
+        URLSession.shared.dataTask(with: req) { data, _, error in
+            var tag: String? = nil
+            var zipURL: URL? = nil
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                tag = json["tag_name"] as? String
+                if let assets = json["assets"] as? [[String: Any]] {
+                    for a in assets {
+                        let name = a["name"] as? String ?? ""
+                        if name.hasSuffix(".zip"), let s = a["browser_download_url"] as? String {
+                            zipURL = URL(string: s)
+                            break
+                        }
+                    }
+                }
+            }
+            let failed = error != nil || tag == nil
+            DispatchQueue.main.async {
+                self.busy = false
+                self.handle(tag: tag, zipURL: zipURL, failed: failed, userInitiated: userInitiated)
+            }
+        }.resume()
+    }
+
+    private func handle(tag: String?, zipURL: URL?, failed: Bool, userInitiated: Bool) {
+        if failed {
+            if userInitiated {
+                info(L("업데이트를 확인하지 못했어요", "Couldn't check for updates"),
+                     L("인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.", "Check your internet connection and try again later."))
+            }
+            return
+        }
+        guard let tag = tag, Updater.isNewer(tag, than: currentVersion), let zipURL = zipURL else {
+            if userInitiated {
+                info(L("최신 버전이에요", "You're up to date"),
+                     L("지금 쓰고 있는 Mochi \(currentVersion)이 최신 버전이에요.", "Mochi \(currentVersion) is the latest version."))
+            }
+            return
+        }
+        let ver = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L("새 버전이 있어요 (\(ver))", "A new version is available (\(ver))")
+        alert.informativeText = L("지금 쓰고 있는 버전은 \(currentVersion)이에요. 업데이트하면 Mochi가 잠깐 꺼졌다가 다시 켜져요.",
+                                  "You have \(currentVersion). Mochi will restart after updating.")
+        alert.addButton(withTitle: L("업데이트", "Update"))
+        alert.addButton(withTitle: L("나중에", "Later"))
+        if alert.runModal() == .alertFirstButtonReturn { install(from: zipURL) }
+    }
+
+    private func install(from zipURL: URL) {
+        busy = true
+        URLSession.shared.downloadTask(with: zipURL) { tmp, _, error in
+            var newApp: URL? = nil
+            var workDir: URL? = nil
+            if let tmp = tmp, error == nil {
+                let fm = FileManager.default
+                let work = fm.temporaryDirectory.appendingPathComponent("MochiUpdate-\(UUID().uuidString)")
+                workDir = work
+                try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+                let zip = work.appendingPathComponent("Mochi.zip")
+                try? fm.moveItem(at: tmp, to: zip)
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                p.arguments = ["-x", "-k", zip.path, work.path]
+                if (try? p.run()) != nil {
+                    p.waitUntilExit()
+                    let app = work.appendingPathComponent("Mochi.app")
+                    if p.terminationStatus == 0 && fm.fileExists(atPath: app.path) { newApp = app }
+                }
+            }
+            DispatchQueue.main.async {
+                self.busy = false
+                guard let newApp = newApp else {
+                    if let w = workDir { try? FileManager.default.removeItem(at: w) }
+                    self.info(L("업데이트를 받지 못했어요", "Couldn't download the update"),
+                              L("잠시 후 다시 시도해 주세요.", "Please try again later."))
+                    return
+                }
+                self.swap(to: newApp)
+            }
+        }.resume()
+    }
+
+    /// Replaces the running app after it quits, then opens the new one.
+    private func swap(to newApp: URL) {
+        let target = Bundle.main.bundleURL
+        let parent = target.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: parent.path) else {
+            info(L("업데이트할 권한이 없어요", "No permission to update"),
+                 L("\(parent.path) 폴더에 쓸 수 없어요.", "Mochi can't write to \(parent.path)."))
+            return
+        }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+        rm -rf "$2"
+        /usr/bin/ditto "$1" "$2"
+        /usr/bin/xattr -dr com.apple.quarantine "$2" 2>/dev/null
+        rm -rf "$3"
+        /usr/bin/open "$2"
+        """
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", script, "mochi-update", newApp.path, target.path,
+                       newApp.deletingLastPathComponent().path]
+        do {
+            try p.run()
+        } catch {
+            info(L("업데이트를 설치하지 못했어요", "Couldn't install the update"), error.localizedDescription)
+            return
+        }
+        NSApp.terminate(nil)
+    }
+
+    private func info(_ title: String, _ text: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.runModal()
+    }
+}
+
 // MARK: - 털색 (랙돌 포인트 컬러)
 
 enum PointColor: String, CaseIterable {
@@ -2050,6 +2220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let tm = Timer(timeInterval: 1.0 / 50, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(tm, forMode: .common)
         timer = tm
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { Updater.shared.checkDaily() }
     }
 
     func spawn(_ c: Breed, offset: CGFloat = 0) {
@@ -2288,6 +2459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tip.isEnabled = false
         m.addItem(tip)
         m.addItem(.separator())
+        m.addItem(item(L("업데이트 확인… (현재 \(Updater.shared.currentVersion))", "Check for Updates… (\(Updater.shared.currentVersion))"), #selector(checkUpdates)))
         m.addItem(item(L("Mochi 삭제…", "Uninstall Mochi…"), #selector(uninstall)))
         m.addItem(item(L("종료", "Quit"), #selector(quit)))
         return m
@@ -2361,6 +2533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func toggleIcon() { hideIcon.toggle(); updateStatusItem() }
     @objc func quit() { NSApp.terminate(nil) }
+    @objc func checkUpdates() { Updater.shared.check(userInitiated: true) }
 
     /// Removes the login item and settings, moves the app to the Trash, then quits.
     @objc func uninstall() {
