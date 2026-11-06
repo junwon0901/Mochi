@@ -1232,7 +1232,7 @@ struct Energy {
     static let levels: [Energy] = [
         // 차분하게: 대부분 구석에서 자고, 가끔 나와서 조금 놀다가 다시 잠
         Energy(sleepBase: 0.35, sleepCap: 0.75, awakeDiv: 120, sleepDur: 90...240, idle: 5...14,
-               chase: 0.10, parkour: 0.10, hops: 1...3, hideTop: 0.2, hideFloor: 0.05, climb: 0.08, move: 0.6),
+               chase: 0.10, parkour: 0.14, hops: 1...3, hideTop: 0.2, hideFloor: 0.05, climb: 0.14, move: 0.6),
         // 보통
         Energy(sleepBase: 0.15, sleepCap: 0.5, awakeDiv: 250, sleepDur: 40...120, idle: 3...9,
                chase: 0.22, parkour: 0.22, hops: 1...4, hideTop: 0.3, hideFloor: 0.1, climb: 0.15, move: 0.85),
@@ -2606,12 +2606,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (i, w) in wins.enumerated() {
             let r = w.rect, top = r.maxY
             let dy = top - footY
-            guard dy > 40, dy < 650, top < vis.maxY - 90 * s else { continue }
+            guard dy > 40, top < vis.maxY - 90 * s else { continue }
             let lo = max(r.minX + 30 * s, vis.minX + 45 * s)
             let hi = min(r.maxX - 30 * s, vis.maxX - 45 * s)
             guard hi > lo else { continue }
             let lx = clampf(x + CGFloat.random(in: -200...200), lo, hi)
-            guard abs(lx - x) < 650 else { continue }
+            guard abs(lx - x) < 1100 else { continue }
             if covered(P(lx, top + 2), before: i) { continue }
             cands.append(P(lx, top))
         }
@@ -2626,14 +2626,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let r = w.rect, top = r.maxY
             if !surface.isFloor && abs(top - surface.y) < 2 && cx >= r.minX && cx <= r.maxX { continue }   // 지금 서 있는 창
             let dy = top - footY
-            guard dy > -520, dy < 460, top < vis.maxY - 90 * s, top > vis.minY + 30 * s else { continue }
+            guard dy > -520, top < vis.maxY - 90 * s, top > vis.minY + 30 * s else { continue }
             let lo = max(r.minX + 30 * s, vis.minX + 45 * s)
             let hi = min(r.maxX - 30 * s, vis.maxX - 45 * s)
             guard hi > lo else { continue }
             let nearLo = cx < (lo + hi) / 2
             let lx = clampf(nearLo ? lo + CGFloat.random(in: 0...90) * s : hi - CGFloat.random(in: 0...90) * s, lo, hi)
             let dx = abs(lx - cx)
-            guard dx > 50 * s, dx < 760 else { continue }
+            guard dx > 50 * s, dx < 1100 else { continue }
             if covered(P(lx, top + 2), before: i) { continue }
             cands.append((P(lx, top), dx + abs(dy) * 0.6))
         }
