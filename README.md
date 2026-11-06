@@ -26,13 +26,11 @@ Requires Xcode or the Command Line Tools (`xcode-select --install`). Runs on mac
 The script builds the app, installs it straight into `/Applications/Mochi.app` and launches it. If an older Mochi is running, it is replaced with the new version.
 
 ## Uninstall
-Pick **Uninstall Mochi…** from the menu. It removes the login item and settings and moves the app to the Trash.
+You don't need the project folder to remove Mochi. Once it is installed, you can delete the folder.
 
-Or run this from the project folder:
-
-```bash
-./uninstall.sh
-```
+- **From the app**: click the menu bar icon (or right-click the cat) and pick **Uninstall Mochi…**. It removes the login item and settings and moves the app to the Trash.
+- **By hand**: quit Mochi, then drag `Mochi.app` from Applications to the Trash.
+- If you still have the project folder, `./uninstall.sh` does the same as the menu item.
 
 ## Controls
 - Click: pet the cat
