@@ -28,7 +28,7 @@ The script builds the app, installs it straight into `/Applications/Mochi.app` a
 ## Updates
 Mochi checks GitHub for a new release once a day and asks before updating. You can also pick **Check for Updates…** from the menu. Updating downloads the new build, replaces the app and restarts it, so you don't need the project folder for this either.
 
-To publish a new version: bump the number in `VERSION`, commit, then push a matching tag (for example `git tag v1.2.0 && git push origin v1.2.0`). A GitHub Action builds `Mochi.app` on macOS and attaches `Mochi.zip` to the release.
+To publish a new version, bump the number in `VERSION` and push to `main`. A GitHub Action builds `Mochi.app` on macOS and publishes `Mochi.zip` as release `v<VERSION>`.
 
 ## Uninstall
 You don't need the project folder to remove Mochi. Once it is installed, you can delete the folder.
@@ -47,4 +47,4 @@ You don't need the project folder to remove Mochi. Once it is installed, you can
 - `sprites/<breed>/*.png`: the artwork for each behavior
 - `build.sh`: builds `Mochi.app` and installs it into Applications
 - `uninstall.sh`: removes the app, its settings and its login item
-- `VERSION`: the app version; `.github/workflows/release.yml` builds releases from tags
+- `VERSION`: the app version; `.github/workflows/release.yml` builds a release whenever it changes

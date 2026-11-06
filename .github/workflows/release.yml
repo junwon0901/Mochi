@@ -1,11 +1,12 @@
 name: Release
 
-# Push a tag like v1.2.0 (matching the VERSION file) to build Mochi.app
-# on macOS and attach Mochi.zip to a GitHub release. The app's
+# Bump the VERSION file and push to main: this builds Mochi.app on macOS
+# and publishes it as Mochi.zip in the release "v<VERSION>". The app's
 # "Check for Updates…" menu item downloads that zip.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [VERSION, .github/workflows/release.yml]
   workflow_dispatch:
 
 permissions:
@@ -24,10 +25,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then TAG="v$(cat VERSION)"; fi
+          TAG="v$(cat VERSION)"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" Mochi.zip --clobber
           else
-            gh release create "$TAG" Mochi.zip --title "Mochi ${TAG#v}" --generate-notes
+            gh release create "$TAG" Mochi.zip --target "$GITHUB_SHA" --title "Mochi ${TAG#v}" --generate-notes
           fi
