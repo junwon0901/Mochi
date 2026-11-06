@@ -1609,21 +1609,9 @@ final class Cat {
             if tg.y - footY > 170 * s { startCome(.spot, spot: tg) } else { jump(toX: tg.x, landY: tg.y) }
             return
         }
-        // 허공에 발판을 만들며 높은 곳으로 놀러 가기
-        if app.climb && chance(e.climb * 0.6) {
-            let vis = app.screen(x: cx, y: footY + 1).visibleFrame
-            let ty = min(footY + CGFloat.random(in: 220...520) * s, vis.maxY - 130 * s)
-            if ty > footY + 120 * s {
-                let tx = clampf(cx + CGFloat.random(in: 200...560) * s * (Bool.random() ? 1 : -1), vis.minX + 130 * s, vis.maxX - 130 * s)
-                startCome(.spot, spot: P(tx, ty))
-                return
-            }
-        }
-        // 투명 발판 위에서는 발판을 밟으며 내려옴
+        // 투명 발판 위에서는 아래(창이나 바닥)로 한 번에 뛰어내림
         if app.onPlatform(self) && chance(0.35) {
-            let vis = app.screen(x: cx, y: footY + 1).visibleFrame
-            let tx = clampf(cx + CGFloat.random(in: 200...480) * s * (Bool.random() ? 1 : -1), vis.minX + 130 * s, vis.maxX - 130 * s)
-            startCome(.spot, spot: P(tx, app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb).y))
+            jumpDown()
             return
         }
         if !surface.isFloor && chance(0.2) {
@@ -1736,10 +1724,16 @@ final class Cat {
             enter(.walk)
             return
         }
+        jumpDown(towardCenter: true)
+    }
+
+    /// 발판 없이 아래쪽 창 윗면이나 바닥으로 한 번에 뛰어내림
+    func jumpDown(towardCenter: Bool = false) {
         let vis = app.screen(x: cx, y: footY + 1).visibleFrame
-        let dir: CGFloat = cx > vis.midX ? -1 : 1
-        let tx = clampf(cx + dir * CGFloat.random(in: 220...460) * s, vis.minX + 130 * s, vis.maxX - 130 * s)
-        startCome(.spot, spot: P(tx, app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb).y))
+        let dir: CGFloat = towardCenter ? (cx > vis.midX ? -1 : 1) : (Bool.random() ? 1 : -1)
+        let tx = clampf(cx + dir * CGFloat.random(in: 160...380) * s, vis.minX + 60 * s, vis.maxX - 60 * s)
+        let g = app.ground(x: tx, fromY: footY - 40 * s, allowWindows: app.climb)
+        jump(toX: tx, landY: g.y)
     }
 
     private func leap(to tg: CGPoint) {
