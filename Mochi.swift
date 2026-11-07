@@ -561,6 +561,9 @@ final class Sprites {
             ("jump", 214.3, 246.0, 73.6, 98.1, 76.0, false, nil),
             ("land", 166.5, 267.0, 68.4, 136.8, 69.8, false, nil),
             ("crouch", 181.5, 193.0, 86.6, 136.1, 62.8, false, nil),
+            ("sitt1", 117.4, 261.1, 73.6, 48.4, 49.5, false, nil),
+            ("sitt2", 117.4, 261.1, 73.6, 48.4, 49.5, false, nil),
+            ("sitt3", 117.4, 261.1, 73.6, 48.4, 49.5, false, nil),
             ("startle", 156.1, 312.0, 95.8, 107.4, 56.5, false, nil),
             ("hang1", 89.5, 467.0, 55.2, 106.4, 84.4, false, P(28.4, 0.0)),
             ("hang2", 80.4, 489.0, 83.0, 147.3, 88.4, false, P(78.1, 0.0)),
@@ -598,6 +601,12 @@ final class Sprites {
             ("jump", 187.3, 279.0, 105.2, 71.6, 73.4, false, nil),
             ("land", 152.2, 275.0, 75.4, 99.9, 57.8, false, nil),
             ("crouch", 144.8, 170.0, 43.6, 86.5, 52.4, false, nil),
+            ("sitt1", 101.3, 303.8, 55.6, 55.9, 40.1, false, nil),
+            ("sitt2", 101.3, 303.8, 55.6, 55.9, 40.1, false, nil),
+            ("sitt3", 101.3, 303.8, 55.6, 55.9, 40.1, false, nil),
+            ("croucht1", 130.3, 230.4, 47.6, 128.0, 31.1, false, nil),
+            ("croucht2", 130.3, 230.4, 47.6, 128.0, 31.1, false, nil),
+            ("croucht3", 130.3, 230.4, 47.6, 128.0, 31.1, false, nil),
             ("startle", 145.7, 234.0, 82.8, 56.3, 49.0, false, nil),
             ("hang1", 66.6, 426.0, 41.3, 98.8, 77.0, false, P(32.4, 0.0)),
             ("hang2", 75.3, 420.0, 74.0, 126.6, 76.0, false, P(75.5, 0.0)),
@@ -789,7 +798,7 @@ final class CatView: NSView {
         case .stand:
             if crouch > 0 && butt != 0 {
                 // 앞발은 땅에 붙인 채 뒷몸만 씰룩
-                let frontPx = info.faceRight ? info.w * 0.82 : info.w * 0.18
+                let frontPx = info.faceRight ? max(info.w * 0.82, info.w - (info.w - info.ax) * 0.4) : min(info.w * 0.18, info.ax * 0.4)
                 let ux = 50 + (frontPx - info.ax) * spriteK * (mirror ? -1 : 1)
                 blit(info, sp: P(frontPx, info.base), u: P(ux, 6), mirror: mirror, rot: butt, sy: 1 - crouch * 0.07)
             } else if crouch > 0 {
@@ -1379,7 +1388,8 @@ final class Cat {
     var visited = false
     var pendingWatch = false
     var groomNext = false
-    var buttWiggle = false          // 이번 웅크림은 덮치기 전 엉덩이 씰룩           // 들려서 옮겨진 뒤 내려오면 털 정리
+    var buttWiggle = false
+    let tailPhase = Double.random(in: 0...3)   // 고양이마다 꼬리 박자가 다르게          // 이번 웅크림은 덮치기 전 엉덩이 씰룩           // 들려서 옮겨진 뒤 내려오면 털 정리
     // 제자리 걷기·달리기 감지
     var progX: CGFloat = 0
     var progT: Double = 0
@@ -1804,6 +1814,17 @@ final class Cat {
         waitKey = o.0
         waitKeyUntil = waitT + o.1
         if o.0 == "play" { facingRight = m.x > cx }
+    }
+
+    /// 꼬리 그림 번호 (1: 늘어뜨림, 2: 반쯤 듦, 3: 끝을 말아 올림).
+    /// 평소에는 몇 초에 한 번 천천히, 집중할 땐 빠르게 탁탁 튕김
+    func tailFrame(fast: Bool) -> Int {
+        let period = fast ? 0.9 : 3.4
+        let flick = fast ? 0.36 : 0.6
+        let p = (t + tailPhase).truncatingRemainder(dividingBy: period)
+        guard p < flick else { return 1 }
+        let seq = [2, 3, 3, 2]
+        return seq[min(seq.count - 1, Int(p / flick * Double(seq.count)))]
     }
 
     /// 갑자기 난 소리에 깜짝 놀라 깸
@@ -2536,6 +2557,14 @@ final class Cat {
             case .peeking: key = peekKey
             case .walkingIn: key = "back"
             }
+        }
+        // 꼬리를 따로 그린 그림이 있으면 꼬리를 움직임: 평소엔 가끔 살랑, 커서에 집중하거나 덮치기 직전엔 탁탁
+        let spset = Sprites.shared.set(breed)
+        if state == .idle && key == "sit" && spset["sitt1"] != nil {
+            let focused = hypot(m.x - cx, m.y - footY) < 260 * s && stillT < 2
+            key = "sitt" + String(tailFrame(fast: focused))
+        } else if state == .crouch && key == "crouch" && spset["croucht1"] != nil {
+            key = "croucht" + String(tailFrame(fast: true))
         }
         if Sprites.shared.set(breed)[key] == nil {   // 그림이 없으면 예전 그림으로
             key = key.hasPrefix("walk") || key.hasPrefix("run") || key == "jump" || key == "land" ? "stand" : "sit"
