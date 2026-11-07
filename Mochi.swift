@@ -1372,6 +1372,7 @@ final class Cat {
     var waitNextAct: Double = 0
     var visited = false
     var pendingWatch = false
+    var groomNext = false           // 들려서 옮겨진 뒤 내려오면 털 정리
     // 제자리 걷기·달리기 감지
     var progX: CGFloat = 0
     var progT: Double = 0
@@ -1432,7 +1433,7 @@ final class Cat {
             waitKey = nil
         case .sleep: stateDur = dur ?? Double.random(in: app.energy.sleepDur) * nightFactor()
         case .watch: stateDur = Double.random(in: 240...480) / nightFactor()
-        case .groom: stateDur = Double.random(in: 3...6)
+        case .groom: stateDur = Double.random(in: 5...10)
         case .stretch: stateDur = 1.8
         case .happy: stateDur = 2.6
         case .surprised:
@@ -1470,6 +1471,9 @@ final class Cat {
             goWatch()
         } else if state == .fall && fallStartY - g.y > 350 {
             enter(.surprised)
+        } else if state == .fall && groomNext {
+            groomNext = false
+            enter(.groom)                    // 들려 다녀서 흐트러진 털 정리
         } else if state == .jump || comeMode != nil {
             if comeMode == nil && parkourHops > 0 { parkourHops -= 1 }
             enter(.land)
@@ -1621,12 +1625,12 @@ final class Cat {
         }
         let r = Double.random(in: 0..<1)
         if r < 0.24 * e.move { startWalkRandom() }
-        else if r < 0.24 * e.move + 0.12 { enter(.groom) }
-        else if r < 0.24 * e.move + 0.18 { enter(.stretch) }
-        else if r < 0.24 * e.move + 0.27 { enter(.knead) }
-        else if r < 0.24 * e.move + 0.34 { enter(.roll) }
-        else if r < 0.24 * e.move + 0.34 + 0.04 * e.move { enter(.spin) }
-        else if r < 0.24 * e.move + 0.34 + 0.08 * e.move && surface.isFloor { startZoomies() }
+        else if r < 0.24 * e.move + 0.22 { enter(.groom) }
+        else if r < 0.24 * e.move + 0.28 { enter(.stretch) }
+        else if r < 0.24 * e.move + 0.37 { enter(.knead) }
+        else if r < 0.24 * e.move + 0.44 { enter(.roll) }
+        else if r < 0.24 * e.move + 0.44 + 0.04 * e.move { enter(.spin) }
+        else if r < 0.24 * e.move + 0.44 + 0.08 * e.move && surface.isFloor { startZoomies() }
         else { enter(.idle) }
     }
 
@@ -2100,6 +2104,7 @@ final class Cat {
             if mag > 2600 { v = P(v.x / mag * 2600, v.y / mag * 2600) }
             vel = v
         }
+        groomNext = chance(0.5)
         startFall()
     }
 
@@ -2324,7 +2329,8 @@ final class Cat {
             if stateT > stateDur { enter(.yawn) }
 
         case .happy:
-            if stateT > stateDur { enter(.idle) }
+            // 쓰다듬은 자리 털을 다시 정리하기도 함
+            if stateT > stateDur { if chance(0.35) { enter(.groom) } else { enter(.idle) } }
 
         case .knead:
             fxT += dt
@@ -2341,8 +2347,16 @@ final class Cat {
                 enter(.idle, dur: Double.random(in: 1.5...3))
             }
 
-        case .groom, .surprised:
+        case .groom:
             if stateT > stateDur { if comeMode != nil { continueCome() } else { enter(.idle) } }
+
+        case .surprised:
+            // 놀란 뒤엔 아무 일 없었다는 듯 그루밍하는 경우가 많음
+            if stateT > stateDur {
+                if comeMode != nil { continueCome() }
+                else if chance(0.45) { enter(.groom) }
+                else { enter(.idle) }
+            }
 
         case .watch:
             awake += dt * 0.3
@@ -2360,7 +2374,8 @@ final class Cat {
             }
 
         case .stretch:
-            if stateT > stateDur { startWalkRandom() }
+            // 기지개 뒤엔 그루밍으로 하루를 시작하기도 함
+            if stateT > stateDur { if chance(0.45) { enter(.groom) } else { startWalkRandom() } }
 
         case .hide:
             updateHide(dt, fdt)
