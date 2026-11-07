@@ -639,6 +639,7 @@ final class CatView: NSView {
     var earTwitch: CGFloat = 0
     var crouch: CGFloat = 0
     var wiggle: CGFloat = 0
+    var butt: CGFloat = 0        // 덮치기 전 엉덩이 씰룩 (앞발을 축으로 흔드는 각도)
     var kick: CGFloat = 0
     var knead: CGFloat = 0
     var peekRot: CGFloat = 0
@@ -786,7 +787,12 @@ final class CatView: NSView {
         let foot = P(info.ax, info.base)
         switch pose {
         case .stand:
-            if crouch > 0 {
+            if crouch > 0 && butt != 0 {
+                // 앞발은 땅에 붙인 채 뒷몸만 씰룩
+                let frontPx = info.faceRight ? info.w * 0.82 : info.w * 0.18
+                let ux = 50 + (frontPx - info.ax) * spriteK * (mirror ? -1 : 1)
+                blit(info, sp: P(frontPx, info.base), u: P(ux, 6), mirror: mirror, rot: butt, sy: 1 - crouch * 0.07)
+            } else if crouch > 0 {
                 blit(info, sp: foot, u: P(50 + wiggle * 0.8, 6), mirror: mirror, rot: wiggle * 0.6, sy: 1 - crouch * 0.07)
             } else if spriteKey.hasPrefix("walk") || spriteKey.hasPrefix("run") || spriteKey == "jump" {
                 // 프레임 그림이 다리를 움직이니 살짝만 출렁 (달리기는 통통 튀어오름)
@@ -1372,7 +1378,8 @@ final class Cat {
     var waitNextAct: Double = 0
     var visited = false
     var pendingWatch = false
-    var groomNext = false           // 들려서 옮겨진 뒤 내려오면 털 정리
+    var groomNext = false
+    var buttWiggle = false          // 이번 웅크림은 덮치기 전 엉덩이 씰룩           // 들려서 옮겨진 뒤 내려오면 털 정리
     // 제자리 걷기·달리기 감지
     var progX: CGFloat = 0
     var progT: Double = 0
@@ -1414,6 +1421,7 @@ final class Cat {
     // MARK: 상태 전환
 
     func enter(_ st: CatState, dur: Double? = nil) {
+        if st != .crouch { buttWiggle = false }
         if st == .walk || st == .run || st == .zoom {
             if abs(cx - moveStartX) < 6 * s && t - moveStartT < 4 { moveRepeats += 1 } else { moveRepeats = 0 }
             moveStartX = cx
@@ -1862,7 +1870,8 @@ final class Cat {
         if abs(m.x - cx) < 70 * s && dy > -20 && dy < 320 {
             grabbing = dy > 60 * s && chance(0.6)       // 높이 있으면 매달리기 시도
             pounce = P(m.x, max(m.y, footY + 40 * s))
-            enter(.crouch)
+            enter(.crouch, dur: Double.random(in: 1.3...2.1))
+            buttWiggle = true           // 몸을 낮추고 → 엉덩이 씰룩씰룩 → 잠깐 멈췄다가 → 덮침
         } else {
             enter(.idle, dur: Double.random(in: 2...4))
             idlePose = .sit
@@ -2600,7 +2609,19 @@ final class Cat {
         v.tilt = tiltNow
 
         v.crouch = state == .crouch ? min(1, CGFloat(stateT) * 5) : 0
-        v.wiggle = state == .crouch ? CGFloat(sin(t * 32)) * 2.2 : 0
+        if state == .crouch && buttWiggle {
+            v.wiggle = 0
+            let w0 = 0.3, w1 = stateDur - 0.25
+            if stateT > w0 && stateT < w1 {
+                let env = min(1, (stateT - w0) / 0.2) * min(1, (w1 - stateT) / 0.15)
+                v.butt = CGFloat(sin((stateT - w0) * 2 * .pi * 3.4) * 3.8 * env)
+            } else {
+                v.butt = 0
+            }
+        } else {
+            v.wiggle = state == .crouch ? CGFloat(sin(t * 32)) * 2.2 : 0
+            v.butt = 0
+        }
         v.kick = (state == .roll || state == .hang) ? CGFloat(sin(t * (state == .hang ? 7 : 5))) : 0
         v.knead = state == .knead ? CGFloat(sin(t * 6)) : 0
 
