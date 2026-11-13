@@ -1393,6 +1393,9 @@ final class Cat {
     var lastKeyReact: Double = -10   // 키보드 반응 쿨타임
     var tiltUntil: Double = 0        // 이때까지 갸웃 (지우기 연타 등)
     var companyPending = false       // 타자 치는 창 위로 같이 있으러 가는 중
+    var crazyUntil: Double = 0       // Crazy cat mode 끝나는 시각
+    var crazyOn = false
+    var crazy: Bool { t < crazyUntil }
     let tailPhase = Double.random(in: 0...3)   // 고양이마다 꼬리 박자가 다르게          // 이번 웅크림은 덮치기 전 엉덩이 씰룩           // 들려서 옮겨진 뒤 내려오면 털 정리
     // 제자리 걷기·달리기 감지
     var progX: CGFloat = 0
@@ -1472,6 +1475,16 @@ final class Cat {
             emit("?", color: rgb(0x8A7BD8), size: 13, dy: 20, vel: P(0, 10), life: 1.2)
         case .hang: stateDur = Double.random(in: 4...9)
         default: stateDur = .infinity
+        }
+        if crazy {
+            // 발광 중엔 쉬지 않고 다음 행동으로
+            switch st {
+            case .idle: stateDur = 0.12
+            case .spin, .roll: stateDur = 0.9
+            case .land: stateDur = 0.12
+            case .groom, .stretch, .yawn, .knead, .happy, .surprised: stateDur = min(stateDur, 0.3)
+            default: break
+            }
         }
     }
 
@@ -1593,6 +1606,7 @@ final class Cat {
     }
 
     func chooseNext(_ mouse: CGPoint) {
+        if crazy { crazyNext(); return }
         let dist = hypot(mouse.x - cx, mouse.y - footY)
         let e = app.energy
         // 영상을 보고 있으면 옆에 와서 같이 봄
@@ -1848,6 +1862,49 @@ final class Cat {
         return seq[min(seq.count - 1, Int(p / flick * Double(seq.count)))]
     }
 
+    // MARK: Crazy cat mode
+
+    /// 10초 동안 발광: 우다다, 붕붕 점프, 빙글빙글, 데굴데굴
+    func goCrazy() {
+        switch state {
+        case .dragged, .hang: return
+        default: break
+        }
+        if state == .hide { abortHide() }
+        clearPlans()
+        crazyUntil = t + 10
+        crazyOn = true
+        awake = 0
+        emit("!", color: rgb(0xFF5A5A), size: 18, dy: 24, vel: P(0, 10), life: 0.9)
+        switch state {
+        case .jump, .fall, .crouch, .hide: return     // 착지하면 바로 시작
+        default: crazyNext()
+        }
+    }
+
+    func crazyNext() {
+        let vis = app.visFor(P(cx, footY + 1))
+        if !surface.isFloor && chance(0.5) { jumpDown(); return }
+        let r = Double.random(in: 0..<1)
+        if r < 0.3 && surface.isFloor {
+            startZoomies()
+            zoomLeft = Int.random(in: 2...3)
+            return
+        }
+        if r < 0.62 {
+            // 제자리에서 붕 높이 뛰기
+            let tx = clampf(cx + CGFloat.random(in: -380...380) * s, vis.minX + 60 * s, vis.maxX - 60 * s)
+            let g = app.ground(x: tx, fromY: footY + 5 * s, allowWindows: app.climb)
+            jump(toX: tx, landY: g.y, peak: max(g.y, footY) + CGFloat.random(in: 120...240) * s)
+            return
+        }
+        if r < 0.74, app.climb, let tg = app.jumpTarget(fromX: cx, footY: footY, s: s), tg.y - footY < 450 * s {
+            jump(toX: tg.x, landY: tg.y)
+            return
+        }
+        enter(r < 0.88 ? .spin : .roll)
+    }
+
     // MARK: 키보드 반응
 
     private var keyCalm: Bool {
@@ -1923,6 +1980,7 @@ final class Cat {
     // MARK: 같이 보기
 
     func startWatchingIfFree() {
+        if crazy { return }
         switch state {
         case .idle, .groom, .knead, .roll, .spin, .happy, .land, .stretch: break
         case .walk:
@@ -2256,6 +2314,16 @@ final class Cat {
 
         if hypot(mouse.x - lastMouse.x, mouse.y - lastMouse.y) > 2 { stillT = 0; lastMouse = mouse } else { stillT += dt }
         if stillT < 1 { visited = false }
+        if crazyOn && !crazy {
+            // 발광이 끝나면 아무 일 없었다는 듯 그루밍
+            crazyOn = false
+            switch state {
+            case .idle, .walk, .run, .zoom, .spin, .roll, .land:
+                clearPlans()
+                enter(.groom)
+            default: break
+            }
+        }
 
         // 안전장치: 걷기·달리기가 제자리에서 반복되면 계획을 버리고 잠시 앉음
         if state == .walk || state == .run || state == .zoom {
@@ -2325,7 +2393,7 @@ final class Cat {
                 targetX = clampf(mouse.x, surface.minX + margin, surface.maxX - margin)
             }
             let fast = state == .run || pendingJump != nil || comeMode == .chase || comeMode == .greet
-            let speed: CGFloat = (fast ? 230 : (pendingSide != nil || comeMode != nil ? 110 : 65)) * s
+            let speed: CGFloat = (fast ? 230 : (pendingSide != nil || comeMode != nil ? 110 : 65)) * s * (crazy ? 1.7 : 1)
             let dx = targetX - cx
             if abs(dx) < 3 * s {
                 if state == .run {
@@ -2371,7 +2439,7 @@ final class Cat {
                 }
             } else {
                 facingRight = dx > 0
-                let step = min(abs(dx), 420 * s * fdt) * (dx > 0 ? 1 : -1)
+                let step = min(abs(dx), 420 * s * fdt * (crazy ? 1.5 : 1)) * (dx > 0 ? 1 : -1)
                 origin.x += step
                 moved = true
                 view.phase += abs(step) / (4.5 * s)
@@ -2797,6 +2865,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var deleteTimes: [Double] = []
     var lastConfuse: Double = 0
     var trustCheckT: Double = 0
+    var wordKeys: [UInt16] = []      // 지금 치고 있는 단어의 글자 키 (자판 위치 기준이라 한글 입력 중에도 됨)
+    var catPendingAt: Double?        // "cat"까지 쳤고, 단어가 끝나는지 보는 중
     var lastGreet: Double = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -3114,6 +3184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
         }
+        if let p = catPendingAt, now - p > 0.7 {         // "cat" 치고 잠깐 멈춤 → 단어 끝
+            catPendingAt = nil
+            wordKeys.removeAll()
+            crazyMode()
+        }
         trustCheckT -= dt
         if trustCheckT <= 0 {
             trustCheckT = 3
@@ -3126,13 +3201,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let code = e.keyCode
             let rep = e.isARepeat
-            DispatchQueue.main.async { self?.handleKey(code, isRepeat: rep) }
+            let cmd = e.modifierFlags.contains(.command) || e.modifierFlags.contains(.control)
+            DispatchQueue.main.async { self?.handleKey(code, isRepeat: rep, cmd: cmd) }
         }
     }
 
-    func handleKey(_ code: UInt16, isRepeat: Bool) {
+    func handleKey(_ code: UInt16, isRepeat: Bool, cmd: Bool = false) {
         guard keysEnabled else { return }
         let now = CACurrentMediaTime()
+        // "cat"이라는 단어를 치면 Crazy cat mode (category 같은 단어 안의 cat은 무시)
+        let letters: Set<UInt16> = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 31, 32, 34, 35, 37, 38, 40, 45, 46]
+        if letters.contains(code) && !cmd {
+            catPendingAt = nil
+            wordKeys.append(code)
+            if wordKeys.count > 8 { wordKeys.removeFirst() }
+            if wordKeys == [8, 0, 17] { catPendingAt = now }      // c, a, t
+        } else {
+            if catPendingAt != nil && code != 51 && code != 117 { crazyMode() }
+            catPendingAt = nil
+            wordKeys.removeAll()
+        }
         switch code {
         case 36, 76:   // Return, Enter
             if isRepeat { return }
@@ -3271,6 +3359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(item(L("창 뒤에 숨기", "Hide behind windows"), #selector(toggleHide), on: hideEnabled))
         m.addItem(item(L("영상 같이 보기 · 소리에 반응", "Watch videos & react to sound"), #selector(toggleWatch), on: watchEnabled))
         m.addItem(item(L("키보드에 반응", "React to typing"), #selector(toggleKeys), on: keysEnabled))
+        m.addItem(item(L("🙀 Crazy cat mode (10초)", "🙀 Crazy cat mode (10 s)"), #selector(crazyMode)))
         if keysEnabled {
             let trusted = AXIsProcessTrusted()
             m.addItem(item(L("Enter·지우기 키도 알아보기", "Also recognize Enter & Delete"), #selector(askKeyAccess), on: trusted))
@@ -3351,6 +3440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !climb { for c in cats where !c.surface.isFloor && c.state != .hide { c.startFall() } }
     }
     @objc func toggleKeys() { keysEnabled.toggle() }
+    @objc func crazyMode() { for c in cats { c.goCrazy() } }
 
     /// Enter 등 키를 구분하려면 손쉬운 사용 권한이 필요
     @objc func askKeyAccess() {

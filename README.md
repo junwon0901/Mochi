@@ -17,6 +17,7 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a S
 - Watches videos with you: when a browser or video player is playing with a big window, it sits by the screen and looks up at it. With music only, it bobs its head. A sudden sound wakes a sleeping cat with a start
 - Reacts to typing: flicks its tail while you type, hops when you press Enter, tilts its head at a flurry of Deletes, and after a long typing session comes to loaf on top of your window (Enter and Delete need Accessibility permission; typing rhythm needs none)
 - Roams freely across multiple monitors
+- Crazy cat mode: type the word `cat` (with key permission) or pick it from the menu, and it goes wild for 10 seconds — zoomies, huge jumps, spins and rolls — then grooms as if nothing happened
 - Gets sleepier at night, and runs over to greet you when you wake or unlock your Mac
 - Pick it up and carry it, or throw it
 - Several cats at once, each with its own breed
