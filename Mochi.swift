@@ -5,6 +5,7 @@ import AppKit
 import QuartzCore
 import ServiceManagement
 import CoreAudio
+import ApplicationServices
 
 // MARK: - 도우미
 
@@ -1389,6 +1390,9 @@ final class Cat {
     var pendingWatch = false
     var groomNext = false
     var buttWiggle = false
+    var lastKeyReact: Double = -10   // 키보드 반응 쿨타임
+    var tiltUntil: Double = 0        // 이때까지 갸웃 (지우기 연타 등)
+    var companyPending = false       // 타자 치는 창 위로 같이 있으러 가는 중
     let tailPhase = Double.random(in: 0...3)   // 고양이마다 꼬리 박자가 다르게          // 이번 웅크림은 덮치기 전 엉덩이 씰룩           // 들려서 옮겨진 뒤 내려오면 털 정리
     // 제자리 걷기·달리기 감지
     var progX: CGFloat = 0
@@ -1504,7 +1508,7 @@ final class Cat {
 
     func clearPlans() {
         pendingSleep = false; pendingSide = nil; pendingJump = nil; parkourHops = 0
-        comeMode = nil; trekHops = 0; pendingWatch = false; waitingCursor = false
+        comeMode = nil; trekHops = 0; pendingWatch = false; waitingCursor = false; companyPending = false
     }
 
     /// 창 사이를 건물 옥상처럼 뛰어다니기: 가장자리까지 달려가서 → 웅크렸다가 → 다음 창으로 점프
@@ -1603,6 +1607,11 @@ final class Cat {
         let nf = nightFactor()
         let sleepChance = min(nf > 1 ? min(0.92, e.sleepCap * 1.25) : e.sleepCap, (e.sleepBase + awake / e.awakeDiv) * nf)
         if chance(sleepChance) { goSleepInCorner(); return }
+        // 모니터가 여러 개면 가끔 다른 모니터로 놀러 감
+        if NSScreen.screens.count > 1 && surface.isFloor && chance(0.02 + 0.05 * e.move), let spot = app.otherScreenSpot(from: self) {
+            startCome(.spot, spot: spot)
+            return
+        }
         if app.chase && chance(e.chase) {
             let high = mouse.y - footY > 200 * s || (!surface.isFloor && mouse.y < footY - 60 * s)
             if high && dist < 1300 && chance(0.25) { startCome(.chase); return }     // 높은 곳의 커서는 가끔만 발판을 밟고 쫓아감
@@ -1689,11 +1698,11 @@ final class Cat {
         }
         trekHops += 1
         if trekHops > 16 { arriveCome(mode); return }
-        let vis = app.screen(x: cx, y: footY + 1).visibleFrame
+        let vis = app.visFor(P(cx, footY + 1))
         let stepX = CGFloat.random(in: 260...420) * s
         let stepUp = CGFloat.random(in: 130...190) * s
         // 투명 발판은 화면 가장자리에서 충분히 떨어뜨림 (끝에서 떨어질 때 벽에 막혀 되돌아오지 않게)
-        let pLo = vis.minX + 130 * s, pHi = vis.maxX - 130 * s
+        var pLo = vis.minX + 130 * s, pHi = vis.maxX - 130 * s
         var tx: CGFloat
         var ty: CGFloat
         if abs(dx) <= stepX * 1.7 && dy <= stepUp * 1.3 && dy > -520 {
@@ -1714,8 +1723,12 @@ final class Cat {
             ty = max(g.y, footY - 360 * s)
             tx = cx + clampf(dx, -stepX * 1.4, stepX * 1.4)
         }
-        tx = clampf(tx, vis.minX + 60 * s, vis.maxX - 60 * s)
-        ty = min(ty, vis.maxY - 115 * s)
+        // 다음 발 디딜 곳이 있는 모니터 안으로 (여러 모니터 사이도 건너감)
+        let tvis = app.visFor(P(tx, ty))
+        pLo = tvis.minX + 130 * s
+        pHi = tvis.maxX - 130 * s
+        tx = clampf(tx, tvis.minX + 60 * s, tvis.maxX - 60 * s)
+        ty = max(tvis.minY, min(ty, tvis.maxY - 115 * s))
         if hypot(tx - cx, ty - footY) < 20 * s { arriveCome(mode); return }   // 더는 못 감
         let final = tx == g.x && ty == g.y
         // 창 윗면 가까이면 발판 대신 창 윗면에 정확히 착지. 바로 밑이 바닥이면 바닥, 아니면 투명 발판
@@ -1789,6 +1802,14 @@ final class Cat {
         case .spot:
             if pendingSleep && surface.isFloor { goSleepInCorner(); return }
             if pendingWatch && surface.isFloor { goWatch(); return }
+            if companyPending {
+                // 타자 치는 창 위에서 식빵 자세로 같이 있어 줌
+                companyPending = false
+                enter(.idle, dur: Double.random(in: 60...150))
+                idlePose = .loaf
+                loafKey = "loaf"
+                return
+            }
             if parkourHops > 0 { parkourHops -= 1 }
             enter(.land)
         }
@@ -1825,6 +1846,53 @@ final class Cat {
         guard p < flick else { return 1 }
         let seq = [2, 3, 3, 2]
         return seq[min(seq.count - 1, Int(p / flick * Double(seq.count)))]
+    }
+
+    // MARK: 키보드 반응
+
+    private var keyCalm: Bool {
+        switch state {
+        case .idle, .groom, .knead, .happy, .land: return true
+        default: return false
+        }
+    }
+
+    /// Enter: 같이 신나서 제자리에서 폴짝
+    func onEnter() {
+        guard keyCalm, t - lastKeyReact > 1.2, chance(0.7) else { return }
+        lastKeyReact = t
+        if state == .idle && (waitingCursor || idlePose == .loaf) {
+            // 커서 곁에서 쉬거나 식빵 중이면 귀만 쫑긋 (눈 깜빡)
+            if waitingCursor { waitKey = "blink"; waitKeyUntil = waitT + 1.0 }
+            return
+        }
+        jump(toX: cx + (facingRight ? 3 : -3) * s, landY: footY, peak: footY + CGFloat.random(in: 26...40) * s)
+    }
+
+    /// Enter를 연달아 누르거나 지우기를 마구 누르면: 갸웃 "?"
+    func onConfusingKeys() {
+        guard keyCalm, t - lastKeyReact > 1.5 else { return }
+        lastKeyReact = t
+        if state != .idle { enter(.idle, dur: 2.5) }
+        if idlePose == .loaf { return }
+        tiltUntil = t + 1.6
+        emit("?", color: rgb(0x8A7BD8), size: 13, dy: 20, vel: P(0, 8), life: 1.1)
+    }
+
+    /// 한동안 타자를 치면, 그 창 위로 올라와 식빵 자세로 곁에 있어 줌
+    func keepCompany(on r: CGRect) -> Bool {
+        guard app.climb, keyCalm, !waitingCursor else { return false }
+        let x = clampf(r.midX + CGFloat.random(in: -0.25...0.25) * r.width, r.minX + 60 * s, r.maxX - 60 * s)
+        guard let top = app.windowTopNear(x: x, y: r.maxY, tol: 4) else { return false }
+        startCome(.spot, spot: P(x, top))
+        companyPending = true
+        return true
+    }
+
+    /// 오래 타자를 치다 멈추면: 수고했다는 듯 기지개나 하품
+    func typingBreak() {
+        guard state == .idle, chance(0.6) else { return }
+        enter(chance(0.5) ? .stretch : .yawn)
     }
 
     /// 갑자기 난 소리에 깜짝 놀라 깸
@@ -1875,6 +1943,13 @@ final class Cat {
             return
         }
         comeMode = nil
+        if x < surface.minX || x > surface.maxX {
+            // 영상이 다른 모니터에 있으면 그 모니터 바닥으로 건너감
+            let v = app.visFor(P(x, app.watchRect.midY))
+            pendingWatch = true
+            startCome(.spot, spot: P(clampf(x, v.minX + 60 * s, v.maxX - 60 * s), v.minY))
+            return
+        }
         targetX = clampf(x, surface.minX + 45 * s, surface.maxX - 45 * s)
         if abs(targetX - cx) < 6 * s {
             pendingWatch = false
@@ -2524,6 +2599,7 @@ final class Cat {
             key = idlePose == .loaf ? loafKey : idleKey
             if idlePose != .loaf && m.y > footY + 110 * s && abs(m.x - cx) < 320 { key = "lookup" }   // 위에 있는 커서 올려다보기
             if idlePose != .loaf && askedTilt && stillT > 1.5 { key = "tilt" }                      // 갸웃
+            if idlePose != .loaf && t < tiltUntil { key = "tilt" }                                    // 키보드 보고 갸웃
             if idlePose != .loaf, waitingCursor, let wk = waitKey {
                 key = wk == "groom" ? (Int(stateT / 0.9) % 2 == 0 ? "groom" : "wash") : wk
             }
@@ -2561,7 +2637,7 @@ final class Cat {
         // 꼬리를 따로 그린 그림이 있으면 꼬리를 움직임: 평소엔 가끔 살랑, 커서에 집중하거나 덮치기 직전엔 탁탁
         let spset = Sprites.shared.set(breed)
         if state == .idle && key == "sit" && spset["sitt1"] != nil {
-            let focused = hypot(m.x - cx, m.y - footY) < 260 * s && stillT < 2
+            let focused = (hypot(m.x - cx, m.y - footY) < 260 * s && stillT < 2) || app.typingRate > 3
             key = "sitt" + String(tailFrame(fast: focused))
         } else if state == .crouch && key == "crouch" && spset["croucht1"] != nil {
             key = "croucht" + String(tailFrame(fast: true))
@@ -2707,11 +2783,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var watchRect = CGRect.zero
     var videoT: Double = 0, noVideoT: Double = 0, musicT: Double = 0, noMusicT: Double = 0
     var silentT: Double = 0          // 소리가 안 난 시간
+    var keysEnabled: Bool { get { d.bool(forKey: "keys") } set { d.set(newValue, forKey: "keys") } }
+    // 타자 감지 (권한 없이: 마지막 키 입력 뒤 지난 시간만 봄)
+    var lastKeySince: Double = 1e9
+    var keyTimes: [Double] = []
+    var typingRate: Double = 0       // 최근 3초 동안 초당 타자 수
+    var typingFor: Double = 0        // 쉬지 않고 타자 친 시간
+    var typingGap: Double = 0
+    var companyDone = false
+    // 키 구분 (손쉬운 사용 권한이 있을 때)
+    var keyMonitor: Any?
+    var enterTimes: [Double] = []
+    var deleteTimes: [Double] = []
+    var lastConfuse: Double = 0
+    var trustCheckT: Double = 0
     var lastGreet: Double = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
         d.register(defaults: ["scale": 0.8, "chase": true, "climb": true, "hide": true,
-                              "hideIcon": false, "cats": ["blue"], "energy": 0, "watch": true])
+                              "hideIcon": false, "cats": ["blue"], "energy": 0, "watch": true, "keys": true])
         refreshWindows()
         var list = (d.stringArray(forKey: "breeds") ?? []).compactMap { Breed(rawValue: $0) }
         if list.isEmpty { list = [.ragdoll] }
@@ -2753,6 +2843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastTick = now
         winT += dt
         if winT > 0.5 { winT = 0; refreshWindows(); updateMedia(0.5) }
+        updateTyping(now, dt)
         updatePlatforms()
         for c in cats { c.update(dt) }
     }
@@ -2790,13 +2881,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSScreen.main ?? scr[0]
     }
 
+    /// 점이 들어 있는 모니터의 보이는 영역. 어느 모니터에도 없으면 가장 가까운 모니터
+    func visFor(_ p: CGPoint) -> CGRect {
+        let scr = NSScreen.screens
+        if let s = scr.first(where: { $0.visibleFrame.contains(p) }) { return s.visibleFrame }
+        func dist(_ r: CGRect) -> CGFloat {
+            let dx = max(r.minX - p.x, 0, p.x - r.maxX), dy = max(r.minY - p.y, 0, p.y - r.maxY)
+            return hypot(dx, dy)
+        }
+        return (scr.min { dist($0.visibleFrame) < dist($1.visibleFrame) } ?? NSScreen.main ?? scr[0]).visibleFrame
+    }
+
+    /// 나란히 붙은 모니터의 바닥 높이가 같으면 바닥을 하나로 이어 걸어서 건너갈 수 있게
+    func floorSpan(_ vis: CGRect) -> (CGFloat, CGFloat) {
+        var lo = vis.minX, hi = vis.maxX
+        var changed = true
+        while changed {
+            changed = false
+            for sc in NSScreen.screens {
+                let v = sc.visibleFrame
+                guard abs(v.minY - vis.minY) < 2 else { continue }
+                if abs(v.maxX - lo) < 3 && v.minX < lo { lo = v.minX; changed = true }
+                if abs(v.minX - hi) < 3 && v.maxX > hi { hi = v.maxX; changed = true }
+            }
+        }
+        return (lo, hi)
+    }
+
+    /// 다른 모니터 바닥의 아무 지점 (모니터가 하나면 nil)
+    func otherScreenSpot(from c: Cat) -> CGPoint? {
+        let scr = NSScreen.screens
+        guard scr.count > 1 else { return nil }
+        let here = visFor(P(c.cx, c.footY + 1))
+        let others = scr.map { $0.visibleFrame }.filter { $0 != here }
+        guard let v = others.min(by: { hypot($0.midX - c.cx, $0.midY - c.footY) < hypot($1.midX - c.cx, $1.midY - c.footY) }) else { return nil }
+        let x = CGFloat.random(in: (v.minX + 130 * c.s)...max(v.minX + 131 * c.s, v.maxX - 130 * c.s))
+        return P(x, v.minY)
+    }
+
     private func covered(_ p: CGPoint, before i: Int) -> Bool {
         wins[0..<i].contains { $0.rect.contains(p) }
     }
 
     func ground(x: CGFloat, fromY: CGFloat, allowWindows: Bool) -> Surface {
         let vis = screen(x: x, y: fromY).visibleFrame
-        var best = Surface(minX: vis.minX, maxX: vis.maxX, y: vis.minY, isFloor: true)
+        let (flo, fhi) = floorSpan(vis)
+        var best = Surface(minX: flo, maxX: fhi, y: vis.minY, isFloor: true)
         for p in plats {
             guard x >= p.minX, x <= p.maxX, p.y <= fromY + 1, p.y > best.y else { continue }
             best = Surface(minX: p.minX, maxX: p.maxX, y: p.y, isFloor: false)
@@ -2953,6 +3083,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if watching && !was { for c in cats { c.startWatchingIfFree() } }
     }
 
+    // MARK: 키보드
+
+    /// 타자 치는 리듬 보기 (권한 필요 없음). 손쉬운 사용 권한이 생기면 키 구분도 켬
+    func updateTyping(_ now: Double, _ dt: Double) {
+        guard keysEnabled else { typingRate = 0; typingFor = 0; return }
+        let since = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        if since < lastKeySince - 0.0005 { keyTimes.append(now) }
+        lastKeySince = since
+        keyTimes.removeAll { now - $0 > 3 }
+        typingRate = Double(keyTimes.count) / 3
+        if since < 2.5 {
+            typingFor += dt
+            typingGap = 0
+        } else {
+            typingGap += dt
+            if typingGap > 8 && typingFor > 60 {
+                for c in cats { c.typingBreak() }      // 오래 치다 쉬면 같이 기지개
+            }
+            if typingGap > 8 { typingFor = 0; companyDone = false }
+        }
+        // 1분 반쯤 계속 치면, 한 마리가 그 창 위로 와서 곁에 있어 줌
+        if typingFor > 90 && !companyDone && !watching {
+            companyDone = true
+            if chance(0.6), let front = NSWorkspace.shared.frontmostApplication {
+                let pid = Int(front.processIdentifier)
+                let mine = wins.filter { $0.pid == pid }
+                if let r = mine.max(by: { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height })?.rect {
+                    for c in cats.shuffled() where c.keepCompany(on: r) { break }
+                }
+            }
+        }
+        trustCheckT -= dt
+        if trustCheckT <= 0 {
+            trustCheckT = 3
+            if keyMonitor == nil && AXIsProcessTrusted() { installKeyMonitor() }
+        }
+    }
+
+    func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            let code = e.keyCode
+            let rep = e.isARepeat
+            DispatchQueue.main.async { self?.handleKey(code, isRepeat: rep) }
+        }
+    }
+
+    func handleKey(_ code: UInt16, isRepeat: Bool) {
+        guard keysEnabled else { return }
+        let now = CACurrentMediaTime()
+        switch code {
+        case 36, 76:   // Return, Enter
+            if isRepeat { return }
+            enterTimes.append(now)
+            enterTimes.removeAll { now - $0 > 2 }
+            if enterTimes.count >= 3 { confuse(now) } else { for c in cats { c.onEnter() } }
+        case 51, 117:  // Delete, Forward Delete
+            deleteTimes.append(now)
+            deleteTimes.removeAll { now - $0 > 2 }
+            if deleteTimes.count >= 8 { confuse(now) }
+        default: break
+        }
+    }
+
+    private func confuse(_ now: Double) {
+        guard now - lastConfuse > 3 else { return }
+        lastConfuse = now
+        for c in cats { c.onConfusingKeys() }
+    }
+
     /// 영상 창 아래 모서리 근처 자리와 바라볼 방향
     func watchSpot(for c: Cat) -> (CGFloat, Bool) {
         let r = watchRect
@@ -3070,6 +3270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(item(L("창 사이 뛰어다니기 (파쿠르)", "Jump between windows (parkour)"), #selector(toggleClimb), on: climb))
         m.addItem(item(L("창 뒤에 숨기", "Hide behind windows"), #selector(toggleHide), on: hideEnabled))
         m.addItem(item(L("영상 같이 보기 · 소리에 반응", "Watch videos & react to sound"), #selector(toggleWatch), on: watchEnabled))
+        m.addItem(item(L("키보드에 반응", "React to typing"), #selector(toggleKeys), on: keysEnabled))
+        if keysEnabled {
+            let trusted = AXIsProcessTrusted()
+            m.addItem(item(L("Enter·지우기 키도 알아보기", "Also recognize Enter & Delete"), #selector(askKeyAccess), on: trusted))
+        }
         m.addItem(.separator())
         if #available(macOS 13.0, *) {
             m.addItem(item(L("로그인 시 자동 실행", "Open at login"), #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
@@ -3145,6 +3350,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         climb.toggle()
         if !climb { for c in cats where !c.surface.isFloor && c.state != .hide { c.startFall() } }
     }
+    @objc func toggleKeys() { keysEnabled.toggle() }
+
+    /// Enter 등 키를 구분하려면 손쉬운 사용 권한이 필요
+    @objc func askKeyAccess() {
+        if AXIsProcessTrusted() {
+            installKeyMonitor()
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = L("손쉬운 사용 권한이 필요해요", "Accessibility permission needed")
+        a.informativeText = L("Enter나 지우기 키를 눌렀을 때 고양이가 반응하려면, 시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 Mochi를 켜 주세요.\n\n모찌는 어떤 키를 눌렀는지만 보고, 입력한 내용은 저장하거나 보내지 않아요. 앱을 업데이트하면 권한을 다시 켜야 할 수 있어요.",
+                                "To react when you press Enter or Delete, turn on Mochi in System Settings › Privacy & Security › Accessibility.\n\nMochi only looks at which key was pressed. It never stores or sends what you type. You may need to turn this on again after an update.")
+        a.addButton(withTitle: L("설정 열기", "Open Settings"))
+        a.addButton(withTitle: L("취소", "Cancel"))
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func toggleWatch() {
         watchEnabled.toggle()
         if !watchEnabled {
