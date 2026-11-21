@@ -1,6 +1,6 @@
 # Mochi 🐾
 
-A desktop cat for macOS that wanders around your screen. Choose a Ragdoll or a Siamese.
+A desktop cat for macOS that wanders around your screen. Choose a Ragdoll, a Siamese or a Norwegian Forest cat.
 
 <p>
   <img src="docs/closeup-parkour.png" width="49%" alt="A ragdoll leaping off the top of a window">

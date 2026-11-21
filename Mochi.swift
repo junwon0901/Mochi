@@ -501,16 +501,17 @@ struct SpriteInfo {
 
 /// 고양이 종
 enum Breed: String, CaseIterable {
-    case ragdoll, siamese
+    case ragdoll, siamese, norwegian
     var label: String {
         switch self {
         case .ragdoll: return L("랙돌 (블루 바이컬러)", "Ragdoll (blue bicolor)")
         case .siamese: return L("샴", "Siamese")
+        case .norwegian: return L("노르웨이숲 (브라운 & 화이트)", "Norwegian Forest (brown & white)")
         }
     }
-    /// 달리기 그림 순서와 프레임마다 튀어 오르는 높이
-    var gallop: [String] { self == .ragdoll ? ["run1", "jump", "run2"] : ["run1", "run2", "run3", "run0"] }
-    var bounces: [CGFloat] { self == .ragdoll ? [0, 5, 1.2] : [0, 4, 0.5, 4] }
+    /// 달리기 그림 순서와 프레임마다 튀어 오르는 높이 (노르웨이숲은 랙돌 그림을 바탕으로 해서 같음)
+    var gallop: [String] { self == .siamese ? ["run1", "run2", "run3", "run0"] : ["run1", "jump", "run2"] }
+    var bounces: [CGFloat] { self == .siamese ? [0, 4, 0.5, 4] : [0, 5, 1.2] }
 }
 
 @MainActor
@@ -617,6 +618,7 @@ final class Sprites {
         ]
         load("ragdoll", ragdoll)
         load("siamese", siamese)
+        load("norwegian", ragdoll)      // 랙돌 그림의 털색·눈색만 바꾼 것이라 위치 정보가 같음
     }
 
     private func load(_ breed: String, _ table: [(String, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, Bool, CGPoint?)]) {
