@@ -7,7 +7,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [VERSION, Mochi.swift, build.sh, "sprites/**", icon.png, .github/workflows/release.yml]
+    paths: [VERSION, Mochi.swift, build.sh, validate_sprites.sh, "sprites/**", icon.png, .github/workflows/release.yml]
   workflow_dispatch:
 
 permissions:

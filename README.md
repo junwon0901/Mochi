@@ -2,6 +2,10 @@
 
 A desktop cat for macOS that wanders around your screen. Choose a Ragdoll, a Siamese or a Norwegian Forest cat.
 
+![Ragdoll, Siamese and Norwegian Forest sprite preview](docs/breeds-1.7-preview.png)
+
+Version 1.7 refreshes every animation frame with a consistent soft-painted look while keeping each breed visually distinct.
+
 <p>
   <img src="docs/closeup-parkour.png" width="49%" alt="A ragdoll leaping off the top of a window">
   <img src="docs/closeup-peek.png" width="49%" alt="A siamese peeking out from behind a window">
@@ -30,7 +34,7 @@ Requires Xcode or the Command Line Tools (`xcode-select --install`). Runs on mac
 ./build.sh
 ```
 
-The script builds the app, installs it straight into `/Applications/Mochi.app` and launches it. If an older Mochi is running, it is replaced with the new version.
+The script first validates all 117 transparent sprite frames, then builds the app, installs it straight into `/Applications/Mochi.app` and launches it. If an older Mochi is running, it is replaced with the new version.
 
 ## Updates
 Mochi checks GitHub for a new release once a day and asks before updating. You can also pick **Check for Updates…** from the menu. Updating downloads the new build, replaces the app and restarts it, so you don't need the project folder for this either.
@@ -53,5 +57,6 @@ You don't need the project folder to remove Mochi. Once it is installed, you can
 - `Mochi.swift`: the whole app (AppKit, single file)
 - `sprites/<breed>/*.png`: the artwork for each behavior
 - `build.sh`: builds `Mochi.app` and installs it into Applications
+- `validate_sprites.sh`: checks that all breed frames exist, use alpha, and keep compatible canvas sizes
 - `uninstall.sh`: removes the app, its settings and its login item
 - `VERSION`: the app version; `.github/workflows/release.yml` builds every push and publishes new versions

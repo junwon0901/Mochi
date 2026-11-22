@@ -6,6 +6,7 @@ set -e
 cd "$(dirname "$0")"
 
 VERSION="$(cat VERSION 2>/dev/null || echo 1.0.0)"
+./validate_sprites.sh
 DEST="/Applications"
 if [ ! -w "$DEST" ]; then
   DEST="$HOME/Applications"          # fall back to ~/Applications if /Applications is not writable
