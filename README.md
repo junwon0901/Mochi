@@ -4,7 +4,7 @@ A desktop cat for macOS that wanders around your screen. Choose a Ragdoll, a Sia
 
 ![Ragdoll, Siamese and Norwegian Forest sprite preview](docs/breeds-1.7-preview.png)
 
-Version 1.7 refreshes every animation frame with a consistent soft-painted look while keeping each breed visually distinct.
+Version 1.7.1 gives the Siamese a denser short coat, a darker seal mask, and rounder blue eyes. It also fixes the direction changes on the way to a nap spot.
 
 <p>
   <img src="docs/closeup-parkour.png" width="49%" alt="A ragdoll leaping off the top of a window">

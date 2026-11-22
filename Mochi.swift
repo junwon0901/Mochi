@@ -589,7 +589,7 @@ final class Sprites {
             ("run3", 153.0, 258.0, 71.3, 68.9, 65.0, false, nil),
             ("walk0", 158.9, 288.0, 60.0, 96.9, 57.6, false, nil),
             ("walk1", 159.2, 287.0, 59.9, 96.0, 57.6, false, nil),
-            ("walk2", 160.4, 286.0, 60.0, 95.3, 57.4, false, nil),
+            ("walk2", 158.6, 286.0, 259.0, 95.3, 57.4, true, nil), // 이 프레임은 오른쪽을 바라봄 (폭 319px)
             ("walk3", 155.1, 287.0, 58.4, 96.0, 55.4, false, nil),
             ("blink", 93.3, 315.0, 51.0, 74.0, 57.1, false, nil),
             ("groom", 117.5, 288.0, 61.9, 69.7, 52.2, false, nil),
@@ -1592,19 +1592,24 @@ final class Cat {
         }
         comeMode = nil
         let jitter = CGFloat(app.cats.firstIndex { $0 === self } ?? 0) * 70 * s + CGFloat.random(in: 0...15) * s
-        let left = surface.minX + 48 * s + jitter
-        let right = surface.maxX - 48 * s - jitter
-        let goLeft = abs(cx - left) < abs(cx - right)
-        targetX = goLeft ? left : right
+        let inset = min(48 * s + jitter, (surface.maxX - surface.minX) / 2)
+        let left = surface.minX + inset
+        let right = surface.maxX - inset
+        targetX = abs(cx - left) < abs(cx - right) ? left : right
         if abs(targetX - cx) < 4 * s {
-            facingRight = goLeft
-            pendingSleep = false
-            awake = 0
-            enter(.sleep)
+            sleepAtCorner()
         } else {
             pendingSleep = true
             enter(.walk)
         }
+    }
+
+    private func sleepAtCorner() {
+        // 도착하면 새 위치를 뽑지 않고 화면 안쪽을 보며 눕는다.
+        facingRight = targetX - surface.minX < surface.maxX - targetX
+        pendingSleep = false
+        awake = 0
+        enter(.sleep)
     }
 
     func chooseNext(_ mouse: CGPoint) {
@@ -2409,7 +2414,7 @@ final class Cat {
                 } else if let e = pendingSide {
                     beginWalkIn(e)
                 } else if pendingSleep && surface.isFloor {
-                    goSleepInCorner()
+                    sleepAtCorner()
                 } else {
                     enter(.idle)
                 }
