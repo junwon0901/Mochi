@@ -24,7 +24,7 @@ Version 1.7.1 gives the Siamese a denser short coat, a darker seal mask, and rou
 - Crazy cat mode: type the word `cat` (with key permission) or pick it from the menu, and it goes wild for 10 seconds — zoomies, huge jumps, spins and rolls — then grooms as if nothing happened
 - Gets sleepier at night, and runs over to greet you when you wake or unlock your Mac
 - Pick it up and carry it, or throw it
-- Several cats at once, each with its own breed
+- Several cats at once. Pick a breed under **Add a cat**, or right-click a cat to change its breed individually.
 - Settings: activity level (calm / normal / playful), size, language (system / 한국어 / English), open at login
 
 ## Build and install

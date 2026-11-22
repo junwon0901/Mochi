@@ -3326,7 +3326,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return it
         }
         m.addItem(item(L("고양이 부르기", "Call the cat"), #selector(summon)))
-        m.addItem(item(L("고양이 한 마리 더", "Add a cat"), #selector(addCat)))
+        let addMenu = NSMenu()
+        addMenu.autoenablesItems = false
+        for br in Breed.allCases {
+            let it = item(br.label, #selector(addCat(_:)), br.rawValue)
+            it.isEnabled = Sprites.shared.has(br)
+            addMenu.addItem(it)
+        }
+        let add = NSMenuItem(title: L("고양이 추가", "Add a cat"), action: nil, keyEquivalent: "")
+        add.submenu = addMenu
+        m.addItem(add)
         if cats.count > 1 {
             m.addItem(item(target != nil ? L("이 고양이 보내기", "Send this cat home") : L("고양이 한 마리 보내기", "Remove a cat"),
                            #selector(removeCat(_:)), Choice(cat: target)))
@@ -3340,7 +3349,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             it.isEnabled = Sprites.shared.has(br)
             breedMenu.addItem(it)
         }
-        let ci = NSMenuItem(title: target != nil ? L("이 고양이 종", "This cat's breed") : L("고양이 종", "Breed"), action: nil, keyEquivalent: "")
+        let breedTitle: String
+        if target != nil {
+            breedTitle = L("이 고양이 종", "This cat's breed")
+        } else if cats.count > 1 {
+            breedTitle = L("모든 고양이 종 바꾸기", "Change all cats' breeds")
+        } else {
+            breedTitle = L("고양이 종", "Breed")
+        }
+        let ci = NSMenuItem(title: breedTitle, action: nil, keyEquivalent: "")
         ci.submenu = breedMenu
         m.addItem(ci)
 
@@ -3411,8 +3428,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let cat = ch.cat { cat.breed = ch.breed } else { for c in cats { c.breed = ch.breed } }
         saveCats()
     }
-    @objc func addCat() {
-        spawn(cats.last?.breed ?? .ragdoll)
+    @objc func addCat(_ it: NSMenuItem) {
+        guard let rawValue = it.representedObject as? String,
+              let breed = Breed(rawValue: rawValue), Sprites.shared.has(breed) else { return }
+        spawn(breed)
         saveCats()
     }
     @objc func removeCat(_ it: NSMenuItem) {
